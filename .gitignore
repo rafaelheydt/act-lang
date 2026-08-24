@@ -1,0 +1,23 @@
+# artefatos pesados — vivem no Drive, nunca no git
+*.pt
+*.pth
+*.ckpt
+*.mp4
+*.avi
+checkpoints/
+rollouts/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+
+# notebooks: saídas limpas antes do commit (nbstripout recomendado)
+.ipynb_checkpoints/
+
+# dados baixados
+data/
+~/.cache/huggingface/

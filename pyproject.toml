@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "act-lang"
+version = "0.1.0"
+description = "ACT com condicionamento em linguagem — comparação de mecanismos de fusão (Push-T -> LIBERO)"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "numpy",
+    "imageio[ffmpeg]",
+    "matplotlib",
+]
+# lerobot[libero] é instalado à parte no Colab (pesado e com deps próprias):
+#   pip install "lerobot[libero]"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
