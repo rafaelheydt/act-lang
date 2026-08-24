@@ -18,6 +18,8 @@ dist/
 # notebooks: saídas limpas antes do commit (nbstripout recomendado)
 .ipynb_checkpoints/
 
-# dados baixados
-data/
+# dados baixados (ANCORADO na raiz — sem a "/" na frente, "data/" também
+# casaria com src/act_lang/data/ e apagaria o pacote inteiro do controle de
+# versão. Isso já aconteceu uma vez neste projeto.)
+/data/
 ~/.cache/huggingface/
