@@ -10,6 +10,12 @@ CORREÇÕES aplicadas em relação ao notebook original (revisão de agosto/2026
      com z = mu, separando ruído de amostragem do sinal de val_loss.
   4. Normalização ImageNet embutida no VisionBackbone (ver backbone.py).
 
+Ablação opcional (desligada por padrão): `decoder_style="detr"` troca o
+nn.TransformerDecoder de prateleira (posição injetada 1x na entrada) por um
+decoder que reinjeta query_pos/memory_pos em q,k de cada camada — fiel ao
+DETR original. Default "torch" preserva o comportamento já validado; ver
+decoder_detr.py.
+
 Ponto de extensão (Fase 2): `fusion` recebe um LanguageFusion; com None o
 modelo é o baseline sem linguagem, byte a byte.
 """
@@ -20,6 +26,7 @@ import torch
 import torch.nn as nn
 
 from .backbone import VisionBackbone
+from .decoder_detr import DETRStyleDecoder
 from .fusion.base import LanguageFusion
 from .positional import PositionalEncoding1D, build_2d_sincos_position_embedding
 
@@ -90,6 +97,7 @@ class ACT(nn.Module):
         dropout: float = 0.1,
         pretrained_backbone: bool = True,
         fusion: Optional[LanguageFusion] = None,
+        decoder_style: str = "torch",
     ):
         super().__init__()
         self.chunk_size = chunk_size
@@ -97,6 +105,8 @@ class ACT(nn.Module):
         self.latent_dim = latent_dim
         self.n_cameras = n_cameras
         self.fusion = fusion  # None = baseline sem linguagem
+        assert decoder_style in ("torch", "detr"), decoder_style
+        self.decoder_style = decoder_style
 
         self.vision_backbone = VisionBackbone(d_model, pretrained=pretrained_backbone)
         self.state_proj = nn.Linear(state_dim, d_model)
@@ -120,12 +130,17 @@ class ACT(nn.Module):
 
         self.action_queries = nn.Parameter(torch.zeros(1, chunk_size, d_model))
         nn.init.normal_(self.action_queries, std=0.02)
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model, n_heads, dim_feedforward=3200, dropout=dropout, batch_first=True
-        )
-        self.transformer_decoder = nn.TransformerDecoder(
-            decoder_layer, num_layers=n_decoder_layers
-        )
+        if decoder_style == "torch":
+            decoder_layer = nn.TransformerDecoderLayer(
+                d_model, n_heads, dim_feedforward=3200, dropout=dropout, batch_first=True
+            )
+            self.transformer_decoder = nn.TransformerDecoder(
+                decoder_layer, num_layers=n_decoder_layers
+            )
+        else:  # "detr": reinjeção posicional em cada camada (ablação)
+            self.transformer_decoder = DETRStyleDecoder(
+                d_model, n_heads, n_decoder_layers, dim_feedforward=3200, dropout=dropout
+            )
         self.action_head = nn.Linear(d_model, action_dim)
 
     def encode_observations(
@@ -134,26 +149,49 @@ class ACT(nn.Module):
         state: torch.Tensor,
         z: torch.Tensor,
         task_texts: Optional[list[str]] = None,
-    ) -> torch.Tensor:
-        camera_tokens = []
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Retorna (memory, memory_pos).
+
+        `memory_pos` guarda os MESMOS embeddings posicionais que já foram
+        somados ao conteúdo de `memory` (o encoder, como o `nn.TransformerEncoder`
+        de prateleira, só recebe posição uma vez, na entrada — CORREÇÃO 2).
+        Devolvê-los à parte permite ao decoder_style="detr" reinjetá-los no
+        cross-attention sem duplicar a soma no conteúdo (v).
+        """
+        camera_tokens, camera_pos = [], []
         for cam_idx in range(self.n_cameras):
             feat_map = self.vision_backbone(images[:, cam_idx])
             b, c, h, w = feat_map.shape
             pos_emb = build_2d_sincos_position_embedding(h, w, c, feat_map.device)
             tokens = feat_map.flatten(2).transpose(1, 2) + pos_emb
             camera_tokens.append(tokens)
+            camera_pos.append(pos_emb.expand(b, -1, -1))
         image_tokens = torch.cat(camera_tokens, dim=1)
+        image_pos = torch.cat(camera_pos, dim=1)
 
         state_tok = self.state_proj(state).unsqueeze(1) + self.extra_pos_embed[:, 0:1]
         z_tok = self.latent_proj(z).unsqueeze(1) + self.extra_pos_embed[:, 1:2]
         tokens = torch.cat([image_tokens, state_tok, z_tok], dim=1)
 
+        batch_size = state.size(0)
+        state_pos = self.extra_pos_embed[:, 0:1].expand(batch_size, -1, -1)
+        z_pos = self.extra_pos_embed[:, 1:2].expand(batch_size, -1, -1)
+        memory_pos = torch.cat([image_pos, state_pos, z_pos], dim=1)
+
         # Fase 2: injeção de linguagem antes do transformer encoder.
         if self.fusion is not None and task_texts is not None:
             lang = self.fusion.encode_text(task_texts, device=tokens.device)
             tokens = self.fusion.fuse(tokens, lang)
+            # tokens de linguagem não têm posição definida -> pad com zeros
+            # pra memory_pos continuar alinhado token a token com memory.
+            if tokens.size(1) != memory_pos.size(1):
+                pad = torch.zeros(
+                    batch_size, tokens.size(1) - memory_pos.size(1), self.d_model,
+                    device=tokens.device,
+                )
+                memory_pos = torch.cat([memory_pos, pad], dim=1)
 
-        return self.transformer_encoder(tokens)
+        return self.transformer_encoder(tokens), memory_pos
 
     def forward(
         self,
@@ -181,7 +219,19 @@ class ACT(nn.Module):
             mu = logvar = None
             z = torch.zeros(batch_size, self.latent_dim, device=images.device)
 
-        memory = self.encode_observations(images, state, z, task_texts)
-        queries = self.action_queries.expand(batch_size, -1, -1)
-        decoded = self.transformer_decoder(tgt=queries, memory=memory)
+        memory, memory_pos = self.encode_observations(images, state, z, task_texts)
+
+        if self.decoder_style == "torch":
+            # comportamento original: action_queries = conteúdo+posição
+            # fundidos, injetados uma única vez como tgt.
+            queries = self.action_queries.expand(batch_size, -1, -1)
+            decoded = self.transformer_decoder(tgt=queries, memory=memory)
+        else:  # "detr": tgt começa em zero; action_queries vira SÓ posição,
+               # reinjetada (junto com memory_pos) em toda camada.
+            query_pos = self.action_queries.expand(batch_size, -1, -1)
+            tgt = torch.zeros_like(query_pos)
+            decoded = self.transformer_decoder(
+                tgt=tgt, memory=memory, query_pos=query_pos, memory_pos=memory_pos
+            )
+
         return self.action_head(decoded), mu, logvar

@@ -68,6 +68,7 @@ Registradas nos docstrings dos módulos; resumo:
 | 6 | Pos. embeddings para tokens de state e z | `models/act.py` | sim |
 | 7 | Off-by-one no resume de checkpoint | `training/checkpoints.py` | — |
 | 8 | Epsilon no range da normalização min-max | `data/normalize.py` | — |
+| 9 | Decoder estilo DETR (reinjeção posicional por camada) — **opt-in**, `decoder_style="detr"` | `models/decoder_detr.py` | ablação separada |
 
 **Atenção**: pelas correções 1, 2, 5 e 6, checkpoints do notebook v1 são
 incompatíveis com este código (state_dict tem chaves novas). O baseline deve

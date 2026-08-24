@@ -71,3 +71,56 @@ class TestTemporalEnsemble:
         chunk = np.ones((4, 2))
         buffer.append(chunk)
         np.testing.assert_allclose(temporal_ensemble(buffer, m=0.01), chunk[0])
+
+
+class TestDecoderStyleEquivalence:
+    """decoder_style='detr' é uma ablação opt-in -- o default ('torch') não
+    pode mudar de comportamento por causa dela. Trava isso automaticamente."""
+
+    def _make_model(self, decoder_style="torch"):
+        from act_lang.models.act import ACT
+        return ACT(
+            action_dim=7, state_dim=8, d_model=64, latent_dim=16, chunk_size=6,
+            n_cameras=2, n_encoder_layers=1, n_decoder_layers=1, n_heads=4,
+            pretrained_backbone=False, decoder_style=decoder_style,
+        )
+
+    def test_default_identico_a_torch_explicito(self):
+        import torch
+
+        torch.manual_seed(0)
+        model_default = self._make_model()  # sem passar decoder_style
+        torch.manual_seed(0)
+        model_explicit = self._make_model(decoder_style="torch")
+
+        model_default.eval()
+        model_explicit.eval()
+        images = torch.rand(2, 2, 3, 64, 64)
+        state = torch.rand(2, 8)
+        actions = torch.rand(2, 6, 7)
+        is_pad = torch.zeros(2, 6, dtype=torch.bool)
+
+        with torch.no_grad():
+            p1, _, _ = model_default(
+                images, state, actions=actions, is_pad=is_pad, sample_posterior=False
+            )
+            p2, _, _ = model_explicit(
+                images, state, actions=actions, is_pad=is_pad, sample_posterior=False
+            )
+        import numpy as np
+        np.testing.assert_array_equal(p1.numpy(), p2.numpy())
+
+    def test_detr_style_roda_e_tem_gradiente(self):
+        import torch
+
+        model = self._make_model(decoder_style="detr")
+        images = torch.rand(2, 2, 3, 64, 64)
+        state = torch.rand(2, 8)
+        actions = torch.rand(2, 6, 7)
+        is_pad = torch.zeros(2, 6, dtype=torch.bool)
+
+        pred, mu, logvar = model(images, state, actions=actions, is_pad=is_pad)
+        assert pred.shape == (2, 6, 7)
+        (pred.sum() + mu.sum() + logvar.sum()).backward()
+        assert model.action_queries.grad is not None
+        assert model.action_queries.grad.abs().sum() > 0

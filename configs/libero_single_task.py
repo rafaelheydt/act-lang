@@ -26,6 +26,9 @@ CONFIG = {
     "n_heads": 8,
     "dropout": 0.1,
     "freeze_bn": True,  # FrozenBatchNorm2d no backbone (padrão ACT/DETR)
+    "decoder_style": "torch",  # "torch" = baseline (validado); "detr" = ablação
+    # com reinjeção posicional por camada -- rodar como experimento separado,
+    # nunca junto com uma mudança de mais nada (ver models/decoder_detr.py)
     # otimização
     "lr": 1e-4,
     "lr_backbone": 1e-5,  # 10x menor — padrão ACT original
