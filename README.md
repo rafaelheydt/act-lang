@@ -17,17 +17,29 @@ com validação no Push-T e benchmark principal no LIBERO.
 ## Uso no Colab
 
 ```python
-!git clone https://github.com/SEU_USER/act-lang.git /content/act-lang
+%cd /content                # sai da pasta antes de apagá-la (evita quebrar o cwd do shell)
+!rm -rf /content/act-lang   # evita clone silenciosamente ignorado numa pasta antiga
+!git clone https://github.com/rafaelheydt/act-lang.git /content/act-lang
 %cd /content/act-lang
 !pip install -q -e . "lerobot[libero]"
 
-%load_ext autoreload
-%autoreload 2
+import sys
+if "/content/act-lang" not in sys.path:
+    sys.path.insert(0, "/content/act-lang")  # necessário p/ importar configs/ (fora de src/)
 ```
 
-Com `%autoreload 2`, edite os `.py` (editor do Colab ou local + `!git pull`) e a
-mudança vale na célula seguinte, sem reiniciar o runtime. Checkpoints e vídeos
-vão para o Drive (estão no `.gitignore`).
+**Depois que essa célula rodar pela primeira vez em cada runtime novo**, faça
+`Runtime > Restart session` antes de continuar — o Python só lê o registro do
+`pip install -e .` na inicialização do interpretador, não em tempo real. Em
+seguida rode a célula de novo (rápido, o cache do pip já tem tudo) e siga
+normalmente. Sem esse restart, `import act_lang` falha mesmo com tudo
+instalado certo.
+
+Sem `%autoreload`: o IPython pinado pelo pacote `google-colab` (7.34.0) quebra
+com ele no runtime atual, e forçar upgrade do IPython quebra `drive.mount()` e
+exibição de vídeo em troca. Editou algo em `src/act_lang/`? Restart session +
+rodar a célula de setup de novo. Checkpoints e vídeos vão para o Drive (estão
+no `.gitignore`).
 
 Notebooks finos em `notebooks/`: `01_treino_libero.ipynb` (dados + treino) e
 `02_rollout_libero.ipynb` (avaliação no ambiente).
