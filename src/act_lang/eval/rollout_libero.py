@@ -1,8 +1,21 @@
 """Rollout no LiberoEnv com temporal ensembling (ACT, Zhao et al. 2023).
 
-CORREÇÃO aplicada: os pesos exp(-m*i) seguem a convenção do paper — w0 é a
-predição MAIS ANTIGA (favorece suavidade). O notebook original invertia a
-ordem, dando peso máximo à predição mais recente.
+CORREÇÕES aplicadas:
+  1. Pesos exp(-m*i) seguem a convenção do paper — w0 é a predição MAIS
+     ANTIGA (favorece suavidade). O notebook original invertia a ordem.
+  2. Seleção de cenário via `init_state_id`, não via `seed`. Conferido no
+     código-fonte de lerobot/envs/libero.py: `reset(seed=...)` usa `seed`
+     só pra `self._env.seed(seed)` (ruído de física/render) -- quem escolhe
+     o layout inicial é `self.init_state_id`, indexando um array de estados
+     pré-computados (`self._init_states`), e esse índice AUTO-INCREMENTA a
+     cada `reset()`, dependendo do histórico de chamadas anteriores no mesmo
+     objeto `env`. Confiar nisso implicitamente é frágil (qualquer reset
+     de diagnóstico feito antes bagunça a sequência); por isso, aqui,
+     `init_state_id` é setado explicitamente a cada episódio.
+  3. `init_state_ids` (lista explícita, opcional) permite amostrar cenários
+     ESPALHADOS pelo intervalo inteiro (ex: [0,5,10,...,45]), não só um
+     bloco consecutivo -- útil pra verificar que o sucesso não é artefato
+     de testar sempre a mesma vizinhança de índices baixos.
 """
 
 from collections import deque
@@ -44,13 +57,31 @@ def rollout_libero(
     seed_start: int = 1000,
     video_fps: int = 20,
     task_text: str | None = None,  # Fase 2: passa a instrução pro modelo
+    init_state_start: int = 0,  # usado só se init_state_ids=None
+    init_state_ids: list[int] | None = None,  # CORREÇÃO 3: amostragem espalhada
 ) -> list[dict]:
     video_dir = Path(video_dir)
     video_dir.mkdir(parents=True, exist_ok=True)
     model.eval()
 
+    n_init_states = len(env._init_states) if getattr(env, "_init_states", None) is not None else None
+
+    if init_state_ids is None:
+        init_state_ids = [init_state_start + ep for ep in range(n_episodes)]
+    n_episodes = len(init_state_ids)
+
+    if n_init_states is not None and max(init_state_ids) >= n_init_states:
+        print(
+            f"aviso: init_state_id máximo pedido ({max(init_state_ids)}) >= "
+            f"{n_init_states} init_states disponíveis -- vai dar módulo "
+            f"(cenários repetidos), conforme o comportamento do próprio env."
+        )
+
     results = []
-    for ep in range(n_episodes):
+    for ep, state_id in enumerate(init_state_ids):
+        # CORREÇÃO 2: init_state_id escolhe o cenário; seed só afeta ruído
+        # de física/render (não reposiciona objetos).
+        env.init_state_id = state_id
         raw_obs, info = env.reset(seed=seed_start + ep)
         frames = [np.concatenate(
             [raw_obs["pixels"]["image"], raw_obs["pixels"]["image2"]], axis=1
@@ -77,9 +108,12 @@ def rollout_libero(
                 break
 
         success = bool(info.get("is_success", False))
-        results.append({"success": success, "steps": step + 1})
+        results.append({"success": success, "steps": step + 1, "init_state_id": state_id})
         tag = "sucesso" if success else "falha"
-        imageio.mimsave(video_dir / f"ep{ep:02d}_{tag}.mp4", frames, fps=video_fps)
-        print(f"episódio {ep + 1}/{n_episodes}: sucesso={success} | steps={step + 1}")
+        imageio.mimsave(video_dir / f"ep{ep:02d}_state{state_id:02d}_{tag}.mp4", frames, fps=video_fps)
+        print(
+            f"episódio {ep + 1}/{n_episodes} (init_state_id={state_id}): "
+            f"sucesso={success} | steps={step + 1}"
+        )
 
     return results

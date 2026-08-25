@@ -124,3 +124,66 @@ class TestDecoderStyleEquivalence:
         (pred.sum() + mu.sum() + logvar.sum()).backward()
         assert model.action_queries.grad is not None
         assert model.action_queries.grad.abs().sum() > 0
+
+
+class TestRolloutInitStateSelection:
+    """Sem MuJoCo real: um env falso registrando só as chamadas de reset()
+    e checando quais init_state_id foram usados, na ordem certa."""
+
+    def _run_com_env_falso(self, **kwargs):
+        import torch
+        from act_lang.data.normalize import MinMaxNormalizer
+        from act_lang.eval.rollout_libero import rollout_libero
+
+        class ModeloFalso:
+            chunk_size = 4
+
+            def eval(self):
+                pass
+
+            def __call__(self, images, state, actions=None, task_texts=None):
+                return torch.zeros(1, self.chunk_size, 7), None, None
+
+        class EnvFalso:
+            def __init__(self, n_states=50):
+                self._init_states = list(range(n_states))
+                self.init_state_id = 0
+                self.chamadas = []
+
+            def reset(self, seed=None):
+                self.chamadas.append(self.init_state_id)
+                img = np.zeros((8, 8, 3), dtype=np.uint8)
+                return {"pixels": {"image": img, "image2": img}}, {"is_success": True}
+
+            def step(self, action):
+                img = np.zeros((8, 8, 3), dtype=np.uint8)
+                obs = {"pixels": {"image": img, "image2": img}}
+                return obs, 0.0, True, False, {"is_success": True}
+
+        # process_libero_obs espera robot_state -- monkeypatch pra pular a
+        # conversão real (não é o que este teste está verificando).
+        import act_lang.eval.rollout_libero as rl_module
+        original = rl_module.process_libero_obs
+        rl_module.process_libero_obs = lambda raw_obs, sn, dev: (
+            torch.zeros(1, 2, 3, 8, 8), torch.zeros(1, 8)
+        )
+        try:
+            env = EnvFalso()
+            norm = MinMaxNormalizer(x_min=torch.zeros(7), x_range=torch.ones(7))
+            rollout_libero(
+                ModeloFalso(), env, norm, norm, torch.device("cpu"),
+                video_dir="/tmp/test_rollout_videos", **kwargs,
+            )
+            return env.chamadas
+        finally:
+            rl_module.process_libero_obs = original
+
+    def test_comportamento_antigo_preservado(self):
+        """Sem init_state_ids: continua sendo init_state_start + range(n_episodes)."""
+        chamadas = self._run_com_env_falso(n_episodes=5, init_state_start=10)
+        assert chamadas == [10, 11, 12, 13, 14]
+
+    def test_lista_explicita_espalhada(self):
+        """Com init_state_ids: usa exatamente essa lista, na ordem dada."""
+        chamadas = self._run_com_env_falso(init_state_ids=[0, 15, 30, 45])
+        assert chamadas == [0, 15, 30, 45]
