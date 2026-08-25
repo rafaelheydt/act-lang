@@ -187,3 +187,37 @@ class TestRolloutInitStateSelection:
         """Com init_state_ids: usa exatamente essa lista, na ordem dada."""
         chamadas = self._run_com_env_falso(init_state_ids=[0, 15, 30, 45])
         assert chamadas == [0, 15, 30, 45]
+
+
+class TestPickDevice:
+    def test_preferencia_explicita_sempre_vence(self, monkeypatch):
+        import torch
+        from act_lang.utils.runtime import pick_device
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+        # mesmo se a GPU 0 tivesse mais memória livre, index explícito=1 vence
+        monkeypatch.setattr(torch.cuda, "mem_get_info", lambda i: (999_000_000_000, 1_000_000_000_000))
+        assert pick_device(preferred_index=1) == torch.device("cuda:1")
+
+    def test_escolhe_gpu_com_mais_memoria_livre(self, monkeypatch):
+        import torch
+        from act_lang.utils.runtime import pick_device
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+
+        def fake_mem_get_info(i):
+            # simula o seu nvidia-smi: cuda:0 (A2000, 6GB, quase cheia de
+            # outros processos) tem menos livre que cuda:1 (RTX 3050, 8GB)
+            return {0: (500_000_000, 6_000_000_000), 1: (7_500_000_000, 8_000_000_000)}[i]
+
+        monkeypatch.setattr(torch.cuda, "mem_get_info", fake_mem_get_info)
+        assert pick_device() == torch.device("cuda:1")
+
+    def test_sem_cuda_cai_pra_cpu(self, monkeypatch):
+        import torch
+        from act_lang.utils.runtime import pick_device
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        assert pick_device() == torch.device("cpu")

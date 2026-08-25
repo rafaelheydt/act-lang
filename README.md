@@ -44,6 +44,34 @@ no `.gitignore`).
 Notebooks finos em `notebooks/`: `01_treino_libero.ipynb` (dados + treino) e
 `02_rollout_libero.ipynb` (avaliação no ambiente).
 
+## Uso local (ex: quando a sessão do Colab expira)
+
+Os dois notebooks detectam o ambiente automaticamente (`try: import
+google.colab`) e ajustam sozinhos: sem clone/reinstalação a cada vez,
+checkpoints numa pasta local em vez do Drive, e a GPU escolhida
+automaticamente entre as disponíveis (a de mais memória livre no momento,
+salvo se você fixar `device_index` no config).
+
+Pré-requisito, uma vez, no terminal (dentro do seu ambiente conda):
+
+```bash
+git clone https://github.com/rafaelheydt/act-lang.git
+cd act-lang && pip install -e . "lerobot[libero]"
+```
+
+Depois é só abrir o Jupyter/notebook normalmente e rodar as células — sem
+precisar do restart de kernel que o Colab exige (`pip install -e .` já
+funciona no mesmo processo fora daquele ambiente específico).
+
+Checkpoints vão para `~/act-lang-checkpoints/<experiment_name>/` por padrão;
+mude com a variável de ambiente `ACT_LANG_CHECKPOINT_DIR` se preferir outro
+lugar. Pra forçar uma GPU específica (ex: a RTX 3050 no índice 1, numa
+máquina com mais de uma GPU), edite `configs/libero_single_task.py`:
+
+```python
+"device_index": 1,  # None = automático (mais memória livre)
+```
+
 ## Testes
 
 ```bash

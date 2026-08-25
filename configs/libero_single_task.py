@@ -6,6 +6,9 @@ copiar/variar por experimento (um arquivo por experimento em configs/).
 
 CONFIG = {
     "experiment_name": "libero_v2_tarefa_unica_sem_lingua",
+    "device_index": None,  # None = auto (GPU com mais memória livre).
+    # Fixe um índice (ex: 1) pra forçar uma GPU específica -- útil numa
+    # máquina com várias GPUs de tamanhos diferentes.
     # dados
     "task_texts": {"pick up the milk and place it in the basket"},
     "task_suite_name": "libero_object",
