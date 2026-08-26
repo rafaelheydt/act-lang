@@ -4,6 +4,9 @@ ACT (Action Chunking Transformer) com condicionamento em linguagem — pesquisa 
 mestrado comparando mecanismos de fusão (token simples / FiLM / cross-attention),
 com validação no Push-T e benchmark principal no LIBERO.
 
+Para como o código funciona por dentro (arquitetura bloco a bloco, loop de
+treinamento), veja [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Fases
 
 1. **Baseline LIBERO, 1 tarefa, sem linguagem** (atual) — valida arquitetura e

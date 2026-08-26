@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+language = ["sentence-transformers"]  # Fase 3: mecanismos de fusão de linguagem
 
 [tool.setuptools.packages.find]
 where = ["src"]
