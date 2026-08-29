@@ -43,7 +43,7 @@ def make_config(fusion_type: str) -> dict:
         "n_heads": 8,
         "dropout": 0.1,
         "freeze_bn": True,
-        "decoder_style": "torch",
+        "decoder_style": "detr",
         "fusion_type": fusion_type,  # "token" | "film" | "cross_attn" -> build_fusion()
         # otimização -- idêntico à Fase 2, único fator que muda é fusion_type
         "lr": 1e-4,
