@@ -239,7 +239,5 @@ class TestFluxoCompletoConfigAteForward:
         state = torch.rand(2, 8)
         actions = torch.rand(2, 4, 7)
         is_pad = torch.zeros(2, 4, dtype=torch.bool)
-        pred, mu, logvar = model(
-            images, state, actions=actions, is_pad=is_pad, task_texts=TASK_TEXTS
-        )
+        pred, mu, logvar = model(images, state, actions=actions, is_pad=is_pad, task_texts=TASK_TEXTS)
         assert pred.shape == (2, 4, 7)
