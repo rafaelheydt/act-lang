@@ -32,16 +32,17 @@ def build_2d_sincos_position_embedding(
     Retorna (1, h*w, d_model), pronto para somar aos tokens achatados.
     """
     assert d_model % 4 == 0, "d_model precisa ser múltiplo de 4 para o sincos 2D"
+    eps = 1e-6
+    scale = 2 * math.pi
     grid_y, grid_x = torch.meshgrid(
-        torch.arange(h, dtype=torch.float32, device=device),
-        torch.arange(w, dtype=torch.float32, device=device),
+        torch.arange(h, dtype=torch.float32, device=device) + 1,   # começa em 1, não em 0
+        torch.arange(w, dtype=torch.float32, device=device) + 1,
         indexing="ij",
     )
+    grid_y = grid_y / (h + eps) * scale   # normaliza pra faixa (0, 2π]
+    grid_x = grid_x / (w + eps) * scale
     dim_quarter = d_model // 4
-    omega = torch.exp(
-        torch.arange(dim_quarter, dtype=torch.float32, device=device)
-        * (-math.log(10000.0) / dim_quarter)
-    )
+    omega = torch.exp(torch.arange(dim_quarter, dtype=torch.float32, device=device) * (-math.log(10000.0) / dim_quarter))
     out_x = grid_x.flatten()[:, None] * omega[None, :]
     out_y = grid_y.flatten()[:, None] * omega[None, :]
     pe = torch.cat(

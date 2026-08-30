@@ -1,8 +1,5 @@
-"""Backbone visual (ResNet18) compartilhado entre câmeras.
-
-CORREÇÃO aplicada (revisão do notebook): a normalização ImageNet vive DENTRO do
-módulo, como buffers. Assim ela viaja com o checkpoint e é impossível esquecer
-de aplicá-la no rollout — o modelo sempre recebe imagens cruas em [0, 1].
+"""
+Backbone visual (ResNet18) compartilhado entre câmeras.
 """
 
 import torch
@@ -19,12 +16,8 @@ class VisionBackbone(nn.Module):
         self.proj = nn.Conv2d(512, d_model, kernel_size=1)
 
         # Estatísticas que os pesos IMAGENET1K_V1 esperam na entrada.
-        self.register_buffer(
-            "img_mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        )
-        self.register_buffer(
-            "img_std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-        )
+        self.register_buffer("img_mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer("img_std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """images: (B, 3, H, W) em [0, 1] -> feature map (B, d_model, h, w)."""

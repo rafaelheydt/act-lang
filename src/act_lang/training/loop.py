@@ -5,9 +5,11 @@ CORREÇÕES aplicadas em relação ao notebook:
     reparametrização contaminando o critério de seleção de modelo.
   - Avaliação em UMA passada pelo val_loader: os dois forwards (z=mu e z=0)
     acontecem no mesmo batch -> o vídeo é decodificado uma vez, não duas.
-  - Early stopping e seleção de melhor checkpoint por `val_recon_z0` — a
-    métrica que corresponde à inferência real (z=0, sem espiar as ações),
-    não o val_loss (que mistura KL e mede outra coisa).
+  - Seleção de melhor checkpoint por `val_recon_z0` — a métrica que
+    corresponde à inferência real (z=0, sem espiar as ações), não o
+    val_loss (que mistura KL e mede outra coisa). Fiel ao ACT oficial:
+    roda `num_epochs` fixas, sem early stopping (train_bc em
+    imitate_episodes.py também não para antes da hora).
 
 MUDANÇA (Fase 2, opcional): `fit(..., val_loader=None)` treina com TODOS os
 dados (sem held-out). Justificativa: com poucos episódios por tarefa (~5,
@@ -107,17 +109,21 @@ def evaluate(model, loader, bridge: Bridge, device, kl_weight: float, free_bits:
 def fit(
     model, train_loader, val_loader, bridge: Bridge, optimizer, device,
     checkpoint_dir: Path, num_epochs: int = 300, kl_weight: float = 10.0,
-    free_bits: float = 0.05, grad_clip_norm: float = 10.0, patience: int = 40,
+    free_bits: float = 0.0, grad_clip_norm: float = 10.0,
     checkpoint_every: int = 50, start_epoch: int = 0, history: dict | None = None,
 ) -> dict:
     """Treina o modelo.
 
-    Com `val_loader` (comportamento original): early stopping e seleção de
-    melhor checkpoint por `val_recon_z0`.
+    Roda `num_epochs` fixas, sempre — sem early stopping, igual ao ACT
+    oficial (train_bc em imitate_episodes.py roda `range(num_epochs)`
+    inteiro, sem `patience` nem parada antecipada).
+
+    Com `val_loader` (comportamento original): seleção do melhor checkpoint
+    por `val_recon_z0` (ainda salva os top-3, mas nunca interrompe o treino
+    por falta de melhora).
 
     Com `val_loader=None` (Fase 2, dataset pequeno demais pra val confiável):
-    treina com TODOS os dados por `num_epochs` fixo (sem early stopping —
-    não há métrica offline pra acionar isso), salvando um checkpoint
+    treina com TODOS os dados por `num_epochs` fixo, salvando um checkpoint
     periódico a cada `checkpoint_every` épocas. A avaliação de qual desses
     checkpoints é o melhor fica pro rollout real, depois do treino.
     """
@@ -132,7 +138,6 @@ def fit(
     # retomar de um checkpoint salvo por uma versão anterior deste arquivo,
     # cujo history pode não ter todas as chaves de hoje (ex: mu_abs_mean).
     best_metric = min(history.get("val_recon_z0", []), default=float("inf"))
-    epochs_without_improvement = 0
     top_k_checkpoints: list = []
 
     for epoch in range(start_epoch, num_epochs):
@@ -162,22 +167,16 @@ def fit(
 
         save_checkpoint(checkpoint_dir / "last_checkpoint.pt", epoch, model, optimizer, history)
 
-        if has_val:
+        if has_val and va["recon_z0"] < best_metric:
             # Critério de seleção: val_recon_z0 (fidelidade à inferência).
-            if va["recon_z0"] < best_metric:
-                best_metric = va["recon_z0"]
-                epochs_without_improvement = 0
-                top_k_checkpoints = save_top_k_checkpoint(
-                    checkpoint_dir, epoch, va["recon_z0"], model, optimizer,
-                    history, top_k_checkpoints, k=3, metric_name="z0",
-                )
-                print(f"  -> novo melhor val_recon_z0: {best_metric:.4f} | "
-                      f"top-3: {[f'{v:.4f}' for v, _ in top_k_checkpoints]}")
-            else:
-                epochs_without_improvement += 1
-                if epochs_without_improvement >= patience:
-                    print(f"Sem melhora por {patience} épocas — early stopping.")
-                    break
+            # Só seleciona/salva o melhor — nunca interrompe o treino.
+            best_metric = va["recon_z0"]
+            top_k_checkpoints = save_top_k_checkpoint(
+                checkpoint_dir, epoch, va["recon_z0"], model, optimizer,
+                history, top_k_checkpoints, k=3, metric_name="z0",
+            )
+            print(f"  -> novo melhor val_recon_z0: {best_metric:.4f} | "
+                  f"top-3: {[f'{v:.4f}' for v, _ in top_k_checkpoints]}")
 
         if (epoch + 1) % checkpoint_every == 0:
             fname = checkpoint_dir / f"periodic_epoch{epoch:03d}.pt"

@@ -51,9 +51,8 @@ def make_config(fusion_type: str) -> dict:
         "weight_decay": 1e-4,
         "num_epochs": 300,
         "kl_weight": 10.0,
-        "free_bits": 0.05,
+        "free_bits": 0.0,  # 0.0 = fiel ao KL cru do ACT oficial (sem free bits)
         "grad_clip_norm": 10.0,
-        "patience": 40,
         "checkpoint_every": 50,
         # rollout -- mesma ressalva da Fase 2: com 10 tarefas, cada uma
         # precisa de env/task_id próprio (notebook de rollout ainda não

@@ -1,4 +1,4 @@
-"""Perda do ACT: L1 mascarada + KL com free bits (validado no Push-T)."""
+"""Perda do ACT: L1 mascarada + KL (fiel ao oficial por padrão, free bits opcional)."""
 
 import torch
 import torch.nn.functional as F
@@ -15,8 +15,12 @@ def masked_l1(
 
 
 def kld_free_bits(
-    mu: torch.Tensor, logvar: torch.Tensor, free_bits: float = 0.05
+    mu: torch.Tensor, logvar: torch.Tensor, free_bits: float = 0.0
 ) -> torch.Tensor:
+    """free_bits=0.0 (padrão) equivale ao KL cru do ACT oficial: como o KL
+    entre duas Gaussianas nunca é negativo, `clamp(kld - 0, min=0) = kld`
+    sem alterar nada. Passe free_bits > 0 para reativar a técnica de free
+    bits (Kingma et al.), não faz parte do ACT original."""
     kld_per_dim = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
     kld_clamped = torch.clamp(kld_per_dim - free_bits, min=0.0)
     return kld_clamped.sum(dim=1).mean(dim=0)
@@ -29,12 +33,13 @@ def act_loss(
     logvar: torch.Tensor,
     is_pad: torch.Tensor,
     kl_weight: float = 10.0,
-    free_bits: float = 0.05,
+    free_bits: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Retorna (loss total, recon, kld_raw).
 
-    O gradiente usa o KL penalizado (free bits); o kld_raw é retornado apenas
-    para logging — monitorar o KL real enquanto se otimiza o clampado.
+    Com free_bits=0.0 (padrão), o gradiente usa o KL cru — mesmo
+    comportamento do ACT oficial (kl_divergence em policy.py, sem clamp).
+    kld_raw é sempre o KL sem clamp, útil pra logging mesmo se free_bits > 0.
     """
     recon_loss = masked_l1(pred_actions, gt_actions, is_pad)
 

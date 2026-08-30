@@ -27,6 +27,7 @@ import torch.nn as nn
 
 from .backbone import VisionBackbone
 from .decoder_detr import DETRStyleDecoder
+from .encoder_detr import DETRStyleEncoder
 from .fusion.base import LanguageFusion
 from .positional import PositionalEncoding1D, build_2d_sincos_position_embedding
 
@@ -44,16 +45,20 @@ class CVAEEncoder(nn.Module):
         n_layers: int = 4,
         n_heads: int = 8,
         dropout: float = 0.1,
+        attention_style: str = "detr",
     ):
         super().__init__()
+        assert attention_style in ("torch", "detr"), attention_style
+        self.attention_style = attention_style
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
         self.state_proj = nn.Linear(state_dim, d_model)
         self.action_proj = nn.Linear(action_dim, d_model)
         self.pos_encoding = PositionalEncoding1D(d_model, max_len=chunk_size + 2)
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model, n_heads, dim_feedforward=3200, dropout=dropout, batch_first=True
-        )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        if attention_style == "torch":
+            encoder_layer = nn.TransformerEncoderLayer(d_model, n_heads, dim_feedforward=3200, dropout=dropout, batch_first=True)
+            self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        else:  # "detr": pos reinjetada em q/k a cada camada, nunca somada ao conteúdo
+            self.encoder = DETRStyleEncoder(d_model, n_heads, n_layers, dim_feedforward=3200, dropout=dropout)
         self.to_mu = nn.Linear(d_model, latent_dim)
         self.to_logvar = nn.Linear(d_model, latent_dim)
 
@@ -68,9 +73,8 @@ class CVAEEncoder(nn.Module):
         state_tok = self.state_proj(state).unsqueeze(1)
         action_toks = self.action_proj(actions)
         tokens = torch.cat([cls, state_tok, action_toks], dim=1)
-        tokens = self.pos_encoding(tokens)
 
-        # CORREÇÃO 1: ações de padding não participam da atenção.
+        # Ações de padding não participam da atenção.
         key_padding_mask = None
         if is_pad is not None:
             prefix = torch.zeros(  # [CLS] e state nunca são padding
@@ -78,8 +82,15 @@ class CVAEEncoder(nn.Module):
             )
             key_padding_mask = torch.cat([prefix, is_pad], dim=1)
 
-        encoded = self.encoder(tokens, src_key_padding_mask=key_padding_mask)
+        if self.attention_style == "torch":
+            tokens = self.pos_encoding(tokens)  # soma única, antes do encoder
+            encoded = self.encoder(tokens, src_key_padding_mask=key_padding_mask)
+        else:  # "detr"
+            pos = self.pos_encoding.pe[:, : tokens.size(1)]  # só os valores, sem somar
+            encoded = self.encoder(tokens, pos=pos, src_key_padding_mask=key_padding_mask)
+
         return self.to_mu(encoded[:, 0]), self.to_logvar(encoded[:, 0])
+
 
 
 class ACT(nn.Module):
@@ -97,7 +108,7 @@ class ACT(nn.Module):
         dropout: float = 0.1,
         pretrained_backbone: bool = True,
         fusion: Optional[LanguageFusion] = None,
-        decoder_style: str = "torch",
+        decoder_style: str = "detr",
     ):
         super().__init__()
         self.chunk_size = chunk_size
@@ -113,7 +124,7 @@ class ACT(nn.Module):
         self.latent_proj = nn.Linear(latent_dim, d_model)
         self.cvae_encoder = CVAEEncoder(
             action_dim, state_dim, d_model, latent_dim, chunk_size,
-            n_heads=n_heads, dropout=dropout,
+            n_heads=n_heads, dropout=dropout, attention_style=decoder_style,
         )
 
         # CORREÇÃO 2: posições dedicadas para os tokens de state e z
@@ -121,12 +132,17 @@ class ACT(nn.Module):
         self.extra_pos_embed = nn.Parameter(torch.zeros(1, 2, d_model))
         nn.init.normal_(self.extra_pos_embed, std=0.02)
 
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model, n_heads, dim_feedforward=3200, dropout=dropout, batch_first=True
-        )
-        self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layer, num_layers=n_encoder_layers
-        )
+        if decoder_style == "torch":
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model, n_heads, dim_feedforward=3200, dropout=dropout, batch_first=True
+            )
+            self.transformer_encoder = nn.TransformerEncoder(
+                encoder_layer, num_layers=n_encoder_layers
+            )
+        else:  # "detr": pos reinjetada em q/k a cada camada (ablação)
+            self.transformer_encoder = DETRStyleEncoder(
+                d_model, n_heads, n_encoder_layers, dim_feedforward=3200, dropout=dropout
+            )
 
         self.action_queries = nn.Parameter(torch.zeros(1, chunk_size, d_model))
         nn.init.normal_(self.action_queries, std=0.02)
@@ -142,6 +158,19 @@ class ACT(nn.Module):
                 d_model, n_heads, n_decoder_layers, dim_feedforward=3200, dropout=dropout
             )
         self.action_head = nn.Linear(d_model, action_dim)
+        self._reset_parameters()
+
+    def _reset_parameters(self) -> None:
+        """Xavier uniform no encoder/decoder principal, fiel ao
+        Transformer._reset_parameters() oficial (DETR/ACT). NÃO toca no
+        vision_backbone (pesos pré-treinados do ImageNet seriam destruídos)
+        nem no cvae_encoder — o oficial também não reseta o encoder da CVAE,
+        só o `Transformer` que faz o encode+decode principal.
+        """
+        for module in (self.transformer_encoder, self.transformer_decoder):
+            for p in module.parameters():
+                if p.dim() > 1:
+                    nn.init.xavier_uniform_(p)
 
     def encode_observations(
         self,
@@ -152,38 +181,52 @@ class ACT(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Retorna (memory, memory_pos).
 
-        `memory_pos` guarda os MESMOS embeddings posicionais que já foram
-        somados ao conteúdo de `memory` (o encoder, como o `nn.TransformerEncoder`
-        de prateleira, só recebe posição uma vez, na entrada — CORREÇÃO 2).
-        Devolvê-los à parte permite ao decoder_style="detr" reinjetá-los no
-        cross-attention sem duplicar a soma no conteúdo (v).
+        Em decoder_style="torch": a posição é somada ao conteúdo uma única
+        vez (ANTES da fusão de linguagem, se houver), porque o
+        nn.TransformerEncoder de prateleira não aceita `pos` separado —
+        mesmo comportamento de antes desta mudança. `memory_pos` guarda uma
+        CÓPIA dos mesmos embeddings já somados a `memory`, só para o
+        decoder_style="detr" poder reinjetá-los no cross-attention do
+        decoder sem duplicar a soma no conteúdo (v).
+
+        Em decoder_style="detr": conteúdo e posição ficam separados até
+        entrar no DETRStyleEncoder, que reinjeta `pos` em q/k a cada camada
+        (nunca soma ao v) — fiel ao encoder principal do ACT/DETR oficial.
+        A fusão de linguagem, nesse modo, opera sobre conteúdo puro (sem
+        posição), e tokens de linguagem entram com posição zero (padding em
+        `memory_pos`) — mesma convenção de antes.
         """
         camera_tokens, camera_pos = [], []
         for cam_idx in range(self.n_cameras):
             feat_map = self.vision_backbone(images[:, cam_idx])
             b, c, h, w = feat_map.shape
             pos_emb = build_2d_sincos_position_embedding(h, w, c, feat_map.device)
-            tokens = feat_map.flatten(2).transpose(1, 2) + pos_emb
-            camera_tokens.append(tokens)
+            camera_tokens.append(feat_map.flatten(2).transpose(1, 2))  # conteúdo puro
             camera_pos.append(pos_emb.expand(b, -1, -1))
-        image_tokens = torch.cat(camera_tokens, dim=1)
+        image_content = torch.cat(camera_tokens, dim=1)
         image_pos = torch.cat(camera_pos, dim=1)
 
-        state_tok = self.state_proj(state).unsqueeze(1) + self.extra_pos_embed[:, 0:1]
-        z_tok = self.latent_proj(z).unsqueeze(1) + self.extra_pos_embed[:, 1:2]
-        tokens = torch.cat([image_tokens, state_tok, z_tok], dim=1)
+        state_content = self.state_proj(state).unsqueeze(1)
+        z_content = self.latent_proj(z).unsqueeze(1)
+        content = torch.cat([image_content, state_content, z_content], dim=1)
 
         batch_size = state.size(0)
         state_pos = self.extra_pos_embed[:, 0:1].expand(batch_size, -1, -1)
         z_pos = self.extra_pos_embed[:, 1:2].expand(batch_size, -1, -1)
         memory_pos = torch.cat([image_pos, state_pos, z_pos], dim=1)
 
+        # "torch": funde posição ao conteúdo AGORA, antes da fusão de
+        # linguagem — preserva exatamente o comportamento anterior a esta
+        # mudança. "detr": mantém conteúdo puro; a soma acontece só dentro
+        # do encoder, camada a camada.
+        tokens = content + memory_pos if self.decoder_style == "torch" else content
+
         # Fase 2: injeção de linguagem antes do transformer encoder.
         if self.fusion is not None and task_texts is not None:
             lang = self.fusion.encode_text(task_texts, device=tokens.device)
             tokens = self.fusion.fuse(tokens, lang)
             # tokens de linguagem não têm posição definida -> pad com zeros
-            # pra memory_pos continuar alinhado token a token com memory.
+            # pra memory_pos continuar alinhado token a token com tokens.
             if tokens.size(1) != memory_pos.size(1):
                 pad = torch.zeros(
                     batch_size, tokens.size(1) - memory_pos.size(1), self.d_model,
@@ -191,7 +234,12 @@ class ACT(nn.Module):
                 )
                 memory_pos = torch.cat([memory_pos, pad], dim=1)
 
-        return self.transformer_encoder(tokens), memory_pos
+        if self.decoder_style == "torch":
+            memory = self.transformer_encoder(tokens)
+        else:  # "detr"
+            memory = self.transformer_encoder(tokens, pos=memory_pos)
+
+        return memory, memory_pos
 
     def forward(
         self,
