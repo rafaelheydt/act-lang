@@ -50,6 +50,9 @@ CONFIG_REGISTRY = {
     "language_token": ("configs.libero_object_language", "CONFIG_TOKEN"),
     "language_film": ("configs.libero_object_language", "CONFIG_FILM"),
     "language_cross_attn": ("configs.libero_object_language", "CONFIG_CROSS_ATTN"),
+    "language_40_token": ("configs.libero_40tasks_language", "CONFIG_TOKEN"),
+    "language_40_film": ("configs.libero_40tasks_language", "CONFIG_FILM"),
+    "language_40_cross_attn": ("configs.libero_40tasks_language", "CONFIG_CROSS_ATTN"),
 }
 
 
