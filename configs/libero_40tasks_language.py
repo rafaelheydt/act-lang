@@ -94,6 +94,7 @@ def make_config(fusion_type: str) -> dict:
         "weight_decay": 1e-4,
         "num_epochs": 50,  # validação mais simples/rápida antes de comprometer com 300
         "kl_weight": 10.0,
+        "kl_warmup_epochs": 10,  # annealing linear 0->kl_weight -- ver diagnóstico de 31/08 (decoder ignorando z)
         "free_bits": 0.05,  # reativado -- ver diagnóstico de colapso de posterior em 30/08
         "grad_clip_norm": 10.0,
         "checkpoint_every": 50,

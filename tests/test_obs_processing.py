@@ -339,11 +339,11 @@ class TestFitSemValidacao:
 
         history = fit(
             model, loader, loader, bridge, optimizer, device,
-            checkpoint_dir=ckpt_dir, num_epochs=2, patience=40, checkpoint_every=100,
+            checkpoint_dir=ckpt_dir, num_epochs=2, checkpoint_every=100,
         )
 
         assert set(history.keys()) == {
-            "train_loss", "train_recon", "train_kld", "train_mu_abs_mean",
+            "train_loss", "train_recon", "train_kld", "train_mu_abs_mean", "kl_weight",
             "val_loss", "val_recon", "val_kld", "val_recon_z0", "val_mu_abs_mean",
         }
         assert len(history["val_recon_z0"]) == 2
@@ -366,7 +366,7 @@ class TestFitSemValidacao:
         )
 
         assert set(history.keys()) == {
-            "train_loss", "train_recon", "train_kld", "train_mu_abs_mean",
+            "train_loss", "train_recon", "train_kld", "train_mu_abs_mean", "kl_weight",
         }
         assert len(history["train_loss"]) == 3
         # sem val: nenhum best_epoch*.pt (não há critério de seleção offline)
@@ -445,3 +445,40 @@ class TestSplitEpisodesMinHoldout:
         )
         assert len(train_ids) == 1
         assert len(val_ids) == 1
+
+
+class TestKLWeightSchedule:
+    """kl_weight_schedule -- annealing linear (Bowman et al. 2016). Ver
+    diagnóstico de 31/08 (decoder ignorando z, medido em
+    diagnose_latent_usage.py) sobre por que isso foi adicionado."""
+
+    def test_warmup_zero_sempre_devolve_o_alvo(self):
+        from act_lang.training.loss import kl_weight_schedule
+
+        for epoch in (0, 1, 50, 299):
+            assert kl_weight_schedule(epoch, target_kl_weight=10.0, warmup_epochs=0) == 10.0
+
+    def test_epoca_zero_comeca_em_zero(self):
+        from act_lang.training.loss import kl_weight_schedule
+
+        assert kl_weight_schedule(0, target_kl_weight=10.0, warmup_epochs=10) == 0.0
+
+    def test_sobe_linear_ate_o_fim_do_warmup(self):
+        from act_lang.training.loss import kl_weight_schedule
+
+        for epoch in range(11):
+            esperado = 10.0 * (epoch / 10)
+            assert kl_weight_schedule(epoch, target_kl_weight=10.0, warmup_epochs=10) == esperado
+
+    def test_fica_travado_no_alvo_depois_do_warmup(self):
+        from act_lang.training.loss import kl_weight_schedule
+
+        for epoch in (10, 11, 50, 299):
+            assert kl_weight_schedule(epoch, target_kl_weight=10.0, warmup_epochs=10) == 10.0
+
+    def test_nunca_ultrapassa_o_alvo(self):
+        from act_lang.training.loss import kl_weight_schedule
+
+        for epoch in range(0, 300, 7):
+            kw = kl_weight_schedule(epoch, target_kl_weight=10.0, warmup_epochs=10)
+            assert 0.0 <= kw <= 10.0

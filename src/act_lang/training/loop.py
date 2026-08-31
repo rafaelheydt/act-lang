@@ -36,7 +36,7 @@ from typing import Callable
 import torch
 
 from .checkpoints import save_checkpoint, save_top_k_checkpoint
-from .loss import act_loss, masked_l1
+from .loss import act_loss, kl_weight_schedule, masked_l1
 
 Bridge = Callable  # (batch, device) -> (images, state, actions, is_pad, task_texts)
 
@@ -109,7 +109,7 @@ def evaluate(model, loader, bridge: Bridge, device, kl_weight: float, free_bits:
 def fit(
     model, train_loader, val_loader, bridge: Bridge, optimizer, device,
     checkpoint_dir: Path, num_epochs: int = 300, kl_weight: float = 10.0,
-    free_bits: float = 0.0, grad_clip_norm: float = 10.0,
+    kl_warmup_epochs: int = 0, free_bits: float = 0.0, grad_clip_norm: float = 10.0,
     checkpoint_every: int = 50, start_epoch: int = 0, history: dict | None = None,
 ) -> dict:
     """Treina o modelo.
@@ -117,6 +117,14 @@ def fit(
     Roda `num_epochs` fixas, sempre — sem early stopping, igual ao ACT
     oficial (train_bc em imitate_episodes.py roda `range(num_epochs)`
     inteiro, sem `patience` nem parada antecipada).
+
+    `kl_warmup_epochs > 0` ativa annealing linear do kl_weight (0 ->
+    kl_weight, ao longo dessas épocas -- ver loss.kl_weight_schedule).
+    Técnica de fora do ACT/paper de referência, usada para incentivar o
+    decoder a de fato USAR z (diferente do free_bits, que só evita o
+    encoder colapsar mu/logvar -- são dois mecanismos distintos, ver
+    diagnóstico em diagnose_latent_usage.py). Padrão (0) desliga, kl_weight
+    fica fixo como sempre foi.
 
     Com `val_loader` (comportamento original): seleção do melhor checkpoint
     por `val_recon_z0` (ainda salva os top-3, mas nunca interrompe o treino
@@ -141,22 +149,24 @@ def fit(
     top_k_checkpoints: list = []
 
     for epoch in range(start_epoch, num_epochs):
+        current_kl_weight = kl_weight_schedule(epoch, kl_weight, kl_warmup_epochs)
         t0 = time.time()
         tr = train_one_epoch(
             model, train_loader, bridge, optimizer, scaler, device,
-            kl_weight, free_bits, grad_clip_norm,
+            current_kl_weight, free_bits, grad_clip_norm,
         )
         for k, v in tr.items():
             history.setdefault(f"train_{k}", []).append(v)
+        history.setdefault("kl_weight", []).append(current_kl_weight)
 
         log_line = (
-            f"epoch {epoch + 1}/{num_epochs} | "
+            f"epoch {epoch + 1}/{num_epochs} | kl_w {current_kl_weight:.3f} | "
             f"train {tr['loss']:.4f} (recon {tr['recon']:.4f}, kld {tr['kld']:.5f}, "
             f"|mu| {tr['mu_abs_mean']:.4f})"
         )
 
         if has_val:
-            va = evaluate(model, val_loader, bridge, device, kl_weight, free_bits)
+            va = evaluate(model, val_loader, bridge, device, current_kl_weight, free_bits)
             for k, v in va.items():
                 history.setdefault(f"val_{k}", []).append(v)
             log_line += (

@@ -242,6 +242,38 @@ class ACT(nn.Module):
 
         return memory, memory_pos
 
+    def decode_with_z(
+        self,
+        images: torch.Tensor,
+        state: torch.Tensor,
+        z: torch.Tensor,
+        task_texts: Optional[list[str]] = None,
+    ) -> torch.Tensor:
+        """Decodifica ações a partir de um `z` explícito, passando por cima
+        do CVAEEncoder -- só para diagnóstico/inspeção (ex: testar
+        sensibilidade do decoder a diferentes amostras de z ~ N(0,1), sem
+        ficar restrito a z=mu ou z=0). Não é usado no treino nem na
+        inferência normal -- `forward()` já cobre os dois casos reais e
+        chama este método internamente.
+        """
+        batch_size = images.size(0)
+        memory, memory_pos = self.encode_observations(images, state, z, task_texts)
+
+        if self.decoder_style == "torch":
+            # comportamento original: action_queries = conteúdo+posição
+            # fundidos, injetados uma única vez como tgt.
+            queries = self.action_queries.expand(batch_size, -1, -1)
+            decoded = self.transformer_decoder(tgt=queries, memory=memory)
+        else:  # "detr": tgt começa em zero; action_queries vira SÓ posição,
+               # reinjetada (junto com memory_pos) em toda camada.
+            query_pos = self.action_queries.expand(batch_size, -1, -1)
+            tgt = torch.zeros_like(query_pos)
+            decoded = self.transformer_decoder(
+                tgt=tgt, memory=memory, query_pos=query_pos, memory_pos=memory_pos
+            )
+
+        return self.action_head(decoded)
+
     def forward(
         self,
         images: torch.Tensor,
@@ -268,19 +300,5 @@ class ACT(nn.Module):
             mu = logvar = None
             z = torch.zeros(batch_size, self.latent_dim, device=images.device)
 
-        memory, memory_pos = self.encode_observations(images, state, z, task_texts)
-
-        if self.decoder_style == "torch":
-            # comportamento original: action_queries = conteúdo+posição
-            # fundidos, injetados uma única vez como tgt.
-            queries = self.action_queries.expand(batch_size, -1, -1)
-            decoded = self.transformer_decoder(tgt=queries, memory=memory)
-        else:  # "detr": tgt começa em zero; action_queries vira SÓ posição,
-               # reinjetada (junto com memory_pos) em toda camada.
-            query_pos = self.action_queries.expand(batch_size, -1, -1)
-            tgt = torch.zeros_like(query_pos)
-            decoded = self.transformer_decoder(
-                tgt=tgt, memory=memory, query_pos=query_pos, memory_pos=memory_pos
-            )
-
-        return self.action_head(decoded), mu, logvar
+        a_hat = self.decode_with_z(images, state, z, task_texts)
+        return a_hat, mu, logvar

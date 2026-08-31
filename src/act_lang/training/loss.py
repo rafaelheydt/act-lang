@@ -20,10 +20,28 @@ def kld_free_bits(
     """free_bits=0.0 (padrão) equivale ao KL cru do ACT oficial: como o KL
     entre duas Gaussianas nunca é negativo, `clamp(kld - 0, min=0) = kld`
     sem alterar nada. Passe free_bits > 0 para reativar a técnica de free
-    bits (Kingma et al.), não faz parte do ACT original."""
+    bits (Kingma et al.), validada à parte no Push-T — não faz parte do
+    ACT original."""
     kld_per_dim = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
     kld_clamped = torch.clamp(kld_per_dim - free_bits, min=0.0)
     return kld_clamped.sum(dim=1).mean(dim=0)
+
+
+def kl_weight_schedule(epoch: int, target_kl_weight: float, warmup_epochs: int) -> float:
+    """kl_weight sobe linearmente de 0 até target_kl_weight ao longo de
+    `warmup_epochs`, depois permanece fixo (annealing, Bowman et al. 2016,
+    "Generating Sentences from a Continuous Space"). Motivação: no começo do
+    treino, com kl_weight baixo, o decoder não paga quase nada por usar z --
+    tende a criar o hábito de depender dele pra reconstruir melhor. Só depois
+    a pressão pra comprimir z sobe, mas o decoder já aprendeu a usá-lo.
+
+    warmup_epochs=0 (padrão) desliga o annealing -- kl_weight fixo em
+    target_kl_weight desde a primeira época, comportamento idêntico a antes
+    desta mudança.
+    """
+    if warmup_epochs <= 0:
+        return target_kl_weight
+    return target_kl_weight * min(1.0, epoch / warmup_epochs)
 
 
 def act_loss(
