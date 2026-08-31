@@ -40,7 +40,6 @@ CONFIG = {
     "kl_weight": 10.0,
     "free_bits": 0.0,  # 0.0 = fiel ao KL cru do ACT oficial (sem free bits)
     "grad_clip_norm": 10.0,
-    "patience": 40,
     "checkpoint_every": 50,
     # rollout
     "rollout_m": 0.01,

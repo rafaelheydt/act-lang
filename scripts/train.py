@@ -41,7 +41,7 @@ from act_lang.models.fusion import build_fusion
 from act_lang.training.checkpoints import load_checkpoint
 from act_lang.training.loop import fit
 from act_lang.training.optim import build_optimizer
-from act_lang.utils.runtime import describe_devices, get_checkpoint_dir, pick_device
+from act_lang.utils.runtime import describe_devices, get_checkpoint_dir, pick_device, set_seed
 
 # nome CLI -> (módulo em configs/, atributo do dict CONFIG dentro dele)
 CONFIG_REGISTRY = {
@@ -85,6 +85,10 @@ def build_data(cfg: dict, device: torch.device):
     train_dataset = LeRobotDataset(REPO_ID, episodes=train_ids, delta_timestamps=delta_ts)
     val_dataset = LeRobotDataset(REPO_ID, episodes=val_ids, delta_timestamps=delta_ts)
 
+    # num_workers=0 é DELIBERADO no Colab: workers com decodificação de
+    # vídeo (fork + ffmpeg do lerobot) travam/vazam no runtime deles. Fora
+    # do Colab, subir para 2-4 workers tende a destravar a GPU (os frames
+    # vêm de vídeo; com 0, a T4 espera a CPU decodificar amostra a amostra).
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=cfg["batch_size"], shuffle=True,
         num_workers=0, drop_last=True,
@@ -137,6 +141,8 @@ def main() -> None:
     device = pick_device(preferred_index=cfg.get("device_index"))
     print(f"usando: {device}")
 
+    set_seed(cfg["seed"])  # pesos, dropout, z, shuffle -- não só o split
+
     train_loader, val_loader, bridge = build_data(cfg, device)
     model, optimizer = build_model_and_optimizer(cfg, device)
 
@@ -144,11 +150,15 @@ def main() -> None:
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     print(f"checkpoints em: {checkpoint_dir}")
 
+    scaler = torch.amp.GradScaler(enabled=(device.type == "cuda"))
+
     start_epoch, history = 0, None
     last_ckpt = checkpoint_dir / "last_checkpoint.pt"
     if args.resume:
         if last_ckpt.exists():
-            start_epoch, history = load_checkpoint(last_ckpt, model, optimizer, device)
+            start_epoch, history = load_checkpoint(
+                last_ckpt, model, optimizer, device, scaler=scaler
+            )
             print(f"retomando de {last_ckpt} -> start_epoch={start_epoch}")
         else:
             print(f"--resume passado, mas {last_ckpt} não existe -- começando do zero.")
@@ -156,9 +166,11 @@ def main() -> None:
     fit(
         model, train_loader, val_loader, bridge, optimizer, device,
         checkpoint_dir=checkpoint_dir, num_epochs=cfg["num_epochs"],
-        kl_weight=cfg["kl_weight"], free_bits=cfg["free_bits"],
+        kl_weight=cfg["kl_weight"],
+        kl_warmup_epochs=cfg.get("kl_warmup_epochs", 0),  # antes: silenciosamente ignorado
+        free_bits=cfg["free_bits"],
         grad_clip_norm=cfg["grad_clip_norm"], checkpoint_every=cfg["checkpoint_every"],
-        start_epoch=start_epoch, history=history,
+        start_epoch=start_epoch, history=history, scaler=scaler,
     )
 
 

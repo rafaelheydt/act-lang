@@ -26,7 +26,24 @@ def sem_download_de_verdade(monkeypatch):
             vecs.append(torch.rand(DEFAULT_TEXT_EMBED_DIM, generator=g))
         return torch.stack(vecs).to(device)
 
+    def fake_encode_tokens(self, texts, device):
+        # Comprimentos DIFERENTES por frase, de propósito: exercita o
+        # padding + key_padding_mask do caminho token-level (cross-attn).
+        seqs = []
+        for t in texts:
+            g = torch.Generator().manual_seed(hash(t) % (2**31))
+            length = 4 + (hash(t) % 3)  # 4..6 tokens
+            seqs.append(torch.rand(length, DEFAULT_TEXT_EMBED_DIM, generator=g))
+        l_max = max(s.size(0) for s in seqs)
+        tokens = torch.zeros(len(texts), l_max, DEFAULT_TEXT_EMBED_DIM)
+        mask = torch.ones(len(texts), l_max, dtype=torch.bool)
+        for i, s in enumerate(seqs):
+            tokens[i, : s.size(0)] = s
+            mask[i, : s.size(0)] = False
+        return tokens.to(device), mask.to(device)
+
     monkeypatch.setattr(TextEmbeddingCache, "encode", fake_encode)
+    monkeypatch.setattr(TextEmbeddingCache, "encode_tokens", fake_encode_tokens)
 
 
 TASK_TEXTS = [
@@ -121,6 +138,52 @@ class TestCrossAttentionFusion:
         assert fusion.proj.weight.grad is not None
         assert fusion.proj.weight.grad.abs().sum() > 0
         assert fusion.cross_attn.out_proj.weight.grad is not None
+
+    def test_nao_degenerada_attended_varia_entre_tokens(self):
+        """Regressão da degenerescência de key única: com a instrução como
+        SEQUÊNCIA de tokens (L>1 keys), o attended de queries diferentes
+        DEVE ser diferente. Na versão antiga (1 key pooled), softmax de 1
+        logito = 1.0 sempre -> attended idêntico pra todos os tokens de
+        observação, e este teste falharia."""
+        from act_lang.models.fusion.cross_attn import CrossAttentionFusion
+
+        torch.manual_seed(0)
+        fusion = CrossAttentionFusion(d_model=16, n_heads=2)
+        fusion.eval()  # sem dropout: diferença observada vem SÓ da atenção
+        obs_tokens = torch.randn(1, 6, 16)  # 6 queries com conteúdos distintos
+        lang = fusion.encode_text(TASK_TEXTS[:1], torch.device("cpu"))
+        with torch.no_grad():
+            attended = fusion.attend(obs_tokens, lang)
+
+        # Se todas as linhas fossem iguais (degenerado), o desvio entre
+        # posições seria ~0. Exige variação genuína entre queries.
+        var_entre_posicoes = attended.std(dim=1).mean().item()
+        assert var_entre_posicoes > 1e-6, (
+            "attended idêntico entre tokens de observação -- cross-attention "
+            "degenerou em deslocamento uniforme (key única?)"
+        )
+
+    def test_padding_da_linguagem_nao_afeta_resultado(self):
+        """As posições de padding da instrução (mask=True) não podem
+        contribuir: trocar o CONTEÚDO do padding não deve mudar nada."""
+        from act_lang.models.fusion.cross_attn import CrossAttentionFusion
+
+        torch.manual_seed(0)
+        fusion = CrossAttentionFusion(d_model=16, n_heads=2)
+        fusion.eval()
+        obs_tokens = torch.randn(1, 4, 16)
+        lang_tokens, mask = fusion.encode_text(TASK_TEXTS[:1], torch.device("cpu"))
+        # injeta padding artificial: 2 posições extras mascaradas com lixo
+        lixo = torch.randn(1, 2, lang_tokens.size(-1))
+        lang_a = (torch.cat([lang_tokens, lixo], dim=1),
+                  torch.cat([mask, torch.ones(1, 2, dtype=torch.bool)], dim=1))
+        lang_b = (torch.cat([lang_tokens, lixo * 100.0], dim=1),
+                  torch.cat([mask, torch.ones(1, 2, dtype=torch.bool)], dim=1))
+        with torch.no_grad():
+            out_a = fusion.fuse(obs_tokens, lang_a)
+            out_b = fusion.fuse(obs_tokens, lang_b)
+
+        assert torch.allclose(out_a, out_b, atol=1e-6)
 
 
 class TestFusionIntegrationComACT:

@@ -24,13 +24,25 @@ class PositionalEncoding1D(nn.Module):
         return x + self.pe[:, : x.size(1)]
 
 
+_SINCOS_2D_CACHE: dict = {}
+
+
 def build_2d_sincos_position_embedding(
     h: int, w: int, d_model: int, device: torch.device
 ) -> torch.Tensor:
     """Embedding 2D sincos para os tokens espaciais do backbone visual.
 
     Retorna (1, h*w, d_model), pronto para somar aos tokens achatados.
+
+    Cache por (h, w, d_model, device): é determinístico e (h, w) são fixos
+    dado o tamanho de entrada — recomputar por câmera a cada forward era
+    trabalho idêntico jogado fora. O tensor cacheado nunca recebe gradiente
+    (é somado como constante), então compartilhá-lo entre forwards é seguro.
     """
+    key = (h, w, d_model, str(device))
+    cached = _SINCOS_2D_CACHE.get(key)
+    if cached is not None:
+        return cached
     assert d_model % 4 == 0, "d_model precisa ser múltiplo de 4 para o sincos 2D"
     eps = 1e-6
     scale = 2 * math.pi
@@ -47,5 +59,6 @@ def build_2d_sincos_position_embedding(
     out_y = grid_y.flatten()[:, None] * omega[None, :]
     pe = torch.cat(
         [torch.sin(out_x), torch.cos(out_x), torch.sin(out_y), torch.cos(out_y)], dim=1
-    )
-    return pe.unsqueeze(0)
+    ).unsqueeze(0)
+    _SINCOS_2D_CACHE[key] = pe
+    return pe

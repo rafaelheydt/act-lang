@@ -43,6 +43,18 @@ def temporal_ensemble(action_buffer: deque, m: float) -> np.ndarray:
     return weights @ preds
 
 
+def _video_frame(raw_obs: dict) -> np.ndarray:
+    """Frame lado a lado das 2 câmeras, com o MESMO flip de 180° aplicado à
+    entrada do modelo (ver obs_processing) — os pixels crus do env vêm
+    invertidos em relação à convenção do dataset; sem o flip, os vídeos de
+    inspeção de falhas (a razão de eles existirem) saíam de cabeça pra baixo.
+    """
+    frame = np.concatenate(
+        [raw_obs["pixels"]["image"], raw_obs["pixels"]["image2"]], axis=1
+    )
+    return frame[::-1, ::-1]  # 180°: inverte H e W, canais intactos
+
+
 @torch.no_grad()
 def rollout_libero(
     model,
@@ -83,9 +95,7 @@ def rollout_libero(
         # de física/render (não reposiciona objetos).
         env.init_state_id = state_id
         raw_obs, info = env.reset(seed=seed_start + ep)
-        frames = [np.concatenate(
-            [raw_obs["pixels"]["image"], raw_obs["pixels"]["image2"]], axis=1
-        )]
+        frames = [_video_frame(raw_obs)]
         action_buffer: deque = deque(maxlen=model.chunk_size)
 
         for step in range(max_steps):
@@ -101,9 +111,7 @@ def rollout_libero(
             raw_obs, reward, terminated, truncated, info = env.step(
                 action.astype(np.float32)
             )
-            frames.append(np.concatenate(
-                [raw_obs["pixels"]["image"], raw_obs["pixels"]["image2"]], axis=1
-            ))
+            frames.append(_video_frame(raw_obs))
             if terminated or truncated:
                 break
 

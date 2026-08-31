@@ -48,6 +48,7 @@ class TextEmbeddingCache:
         self.model_name = model_name
         self._st_model = None
         self._cache: dict[str, torch.Tensor] = {}
+        self._token_cache: dict[str, torch.Tensor] = {}
 
     def _ensure_loaded(self):
         if self._st_model is None:
@@ -63,3 +64,47 @@ class TextEmbeddingCache:
             for t, e in zip(uncached, embs):
                 self._cache[t] = e.detach().cpu()  # cache em CPU; move pro device no uso
         return torch.stack([self._cache[t] for t in texts]).to(device)
+
+    @torch.no_grad()
+    def encode_tokens(
+        self, texts: list[str], device: torch.device
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """(lista de B strings) -> (tokens, key_padding_mask), sem gradiente.
+
+        tokens: (B, L_max, embed_dim) -- embeddings POR TOKEN da frase (saída
+        token-level do sentence-transformer, inclui tokens especiais), com
+        padding de zeros até o comprimento máximo do batch.
+        key_padding_mask: (B, L_max) bool, True = posição de padding --
+        convenção do nn.MultiheadAttention (True é ignorado na atenção).
+
+        Motivação (correção da cross-attention degenerada): com o embedding
+        pooled único, a atenção tinha 1 key -> softmax de 1 logit = 1.0,
+        independente da query; o "attended" saía idêntico para todos os
+        tokens de observação. Com os embeddings por token, a instrução vira
+        múltiplas keys/values e cada token de observação pode de fato
+        atender a partes diferentes dela ("milk" vs "basket").
+
+        Cache por string exata, como no encode(): vocabulário do LIBERO é
+        pequeno e fixo, não faz sentido recomputar a cada batch.
+        """
+        self._ensure_loaded()
+        uncached = [t for t in texts if t not in self._token_cache]
+        if uncached:
+            # output_value="token_embeddings": lista de tensores (L_i, dim),
+            # um por frase, comprimentos variados.
+            embs = self._st_model.encode(
+                uncached, convert_to_tensor=True, output_value="token_embeddings"
+            )
+            for t, e in zip(uncached, embs):
+                self._token_cache[t] = e.detach().cpu()
+
+        seqs = [self._token_cache[t] for t in texts]
+        lengths = [s.size(0) for s in seqs]
+        l_max = max(lengths)
+        embed_dim = seqs[0].size(1)
+        tokens = torch.zeros(len(texts), l_max, embed_dim)
+        mask = torch.ones(len(texts), l_max, dtype=torch.bool)  # True = padding
+        for i, (s, length) in enumerate(zip(seqs, lengths)):
+            tokens[i, :length] = s
+            mask[i, :length] = False
+        return tokens.to(device), mask.to(device)

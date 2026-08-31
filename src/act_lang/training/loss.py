@@ -14,6 +14,25 @@ def masked_l1(
     return (abs_err * valid_mask).sum() / num_valid
 
 
+def masked_l1_sums(
+    pred: torch.Tensor, target: torch.Tensor, is_pad: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """(soma de |erro| nos elementos válidos, nº de elementos válidos).
+
+    Para agregação CORRETA sobre um dataset inteiro: acumule as duas somas
+    entre batches e divida UMA vez no final. Média-de-médias por batch
+    (masked_l1 por batch / n_batches) enviesa quando o último batch é menor
+    (sem drop_last no val) e quando o nº de elementos válidos varia por
+    batch (padding diferente) — o viés é pequeno e quase constante entre
+    épocas (a SELEÇÃO de checkpoint sobrevive), mas o número reportado não
+    é a média verdadeira do dataset.
+    """
+    abs_err = F.l1_loss(pred, target, reduction="none")
+    valid_mask = (~is_pad).unsqueeze(-1)
+    num_valid = valid_mask.sum() * abs_err.shape[-1]
+    return (abs_err * valid_mask).sum(), num_valid
+
+
 def kld_free_bits(
     mu: torch.Tensor, logvar: torch.Tensor, free_bits: float = 0.0
 ) -> torch.Tensor:

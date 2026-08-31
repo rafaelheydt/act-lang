@@ -7,9 +7,34 @@ precisa mudar entre os dois ambientes (montar Drive vs pasta local, device
 """
 
 import os
+import random
 from pathlib import Path
 
 import torch
+
+
+def set_seed(seed: int) -> None:
+    """Seed global: torch (CPU+CUDA), numpy e random.
+
+    Motivação (registro de método): o `seed` do config controlava SÓ o split
+    de episódios -- init de pesos, dropout, amostragem do z e shuffle do
+    DataLoader ficavam sem seed. Para comparar mecanismos de fusão, a
+    diferença entre eles precisa ser maior que a variância entre runs; sem
+    seed não dá nem pra estimar essa variância, nem pra garantir condições
+    iniciais comparáveis. Para a comparação final, rode 2-3 seeds por
+    mecanismo e reporte média ± desvio.
+
+    NÃO liga o modo determinístico do cuDNN (torch.use_deterministic_
+    algorithms): na T4 o custo de desempenho não compensa -- seed igual +
+    mesmo hardware já dá reprodutibilidade prática suficiente aqui.
+    """
+    random.seed(seed)
+    torch.manual_seed(seed)  # cobre CUDA também (torch >= 1.8)
+    try:
+        import numpy as np
+        np.random.seed(seed)
+    except ImportError:
+        pass
 
 
 def is_colab() -> bool:

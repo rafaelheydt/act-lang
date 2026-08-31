@@ -2,7 +2,7 @@
 
 ACT (Action Chunking Transformer) com condicionamento em linguagem — pesquisa de
 mestrado comparando mecanismos de fusão (token simples / FiLM / cross-attention),
-com validação no Push-T e benchmark principal no LIBERO.
+com validação no benchmark principal no LIBERO.
 
 Para como o código funciona por dentro (arquitetura bloco a bloco, loop de
 treinamento), veja [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -82,25 +82,3 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-Cobrem as duas conversões críticas do rollout (fórmula `quat2axisangle` do
-`LiberoProcessorStep` e a direção dos pesos do temporal ensembling).
-
-## Correções aplicadas em relação ao notebook original (v1)
-
-Registradas nos docstrings dos módulos; resumo:
-
-| # | Correção | Onde | Exige retreino? |
-|---|----------|------|-----------------|
-| 1 | Máscara de padding no CVAE encoder (`src_key_padding_mask`) | `models/act.py` | sim |
-| 2 | Normalização ImageNet como buffer do backbone | `models/backbone.py` | sim |
-| 3 | Temporal ensembling: w0 = predição mais antiga (paper) | `eval/rollout_libero.py` | não |
-| 4 | Validação determinística (z=mu) + seleção por `val_recon_z0` | `training/loop.py` | não |
-| 5 | LR do backbone 10x menor + FrozenBatchNorm opcional | `training/optim.py`, `models/backbone.py` | sim |
-| 6 | Pos. embeddings para tokens de state e z | `models/act.py` | sim |
-| 7 | Off-by-one no resume de checkpoint | `training/checkpoints.py` | — |
-| 8 | Epsilon no range da normalização min-max | `data/normalize.py` | — |
-| 9 | Decoder estilo DETR (reinjeção posicional por camada) — **opt-in**, `decoder_style="detr"` | `models/decoder_detr.py` | ablação separada |
-
-**Atenção**: pelas correções 1, 2, 5 e 6, checkpoints do notebook v1 são
-incompatíveis com este código (state_dict tem chaves novas). O baseline deve
-ser retreinado — e os números v1/v2 não são comparáveis entre si.

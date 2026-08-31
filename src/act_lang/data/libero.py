@@ -166,6 +166,16 @@ def split_episodes_min_holdout(
 
 
 def make_delta_timestamps(fps: float, obs_horizon: int = 1, pred_horizon: int = 50) -> dict:
+    # O LiberoActBridge assume obs_horizon=1 (imagens SEM dimensão temporal,
+    # comportamento observado do lerobot nesse caso). Com obs_horizon>1 o
+    # stack das câmeras viraria (B, 2, T, C, H, W) e o ACT quebraria -- ou
+    # pior, falharia de forma confusa. Falhar alto aqui, no ponto único de
+    # consumo do parâmetro, até o bridge tratar a dimensão temporal.
+    assert obs_horizon == 1, (
+        f"obs_horizon={obs_horizon} não suportado: o LiberoActBridge assume "
+        "obs_horizon=1 (sem dimensão temporal nas imagens). Ajuste o config "
+        "ou estenda o bridge antes de mudar isso."
+    )
     return {
         "observation.images.image": [-i / fps for i in reversed(range(obs_horizon))],
         "observation.images.image2": [-i / fps for i in reversed(range(obs_horizon))],
