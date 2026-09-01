@@ -1,0 +1,1167 @@
+diff --git a/configs/libero_object_multitask.py b/configs/libero_object_multitask.py
+index 1344d94..f9538bb 100644
+--- a/configs/libero_object_multitask.py
++++ b/configs/libero_object_multitask.py
+@@ -1,113 +1,70 @@
+-"""Config: LIBERO, 40 tarefas (todo o repositório lerobot/libero disponível),
+-COM linguagem.
++"""Config: LIBERO, 10 tarefas misturadas do libero_object, sem linguagem (Fase 2).
+ 
+-Mesma estrutura de configs/libero_object_language.py, mas com o conjunto de
+-tarefas ampliado: as 10 tarefas do libero_object originais + ~30 tarefas
+-adicionais já presentes no mesmo repositório HuggingFace (lerobot/libero) --
+-gavetas, fogão, moka pot, micro-ondas, etc; não é uma suite "pura" do LIBERO
+-oficial, é o que esse repositório específico já hospeda. 1.693 episódios no
+-total (vs. 454 na versão de 10 tarefas), ~4x mais dado -- objetivo direto:
+-reduzir o overfitting que apareceu cedo na versão de 10 tarefas (ver
+-diagnóstico de 30/08, val_recon divergindo de train_recon já na época 3).
++Mede o "chão": quanto a ambiguidade custa quando o modelo vê a MESMA cena
++(mesmos objetos na mesa) mas não recebe instrução nenhuma dizendo qual pegar.
++Sem essa informação, não há como saber -- diferente da Fase 1 (1 tarefa),
++onde a ambiguidade era zero por construção.
+ 
+-`make_config(fusion_type)` gera os 3 configs a partir de uma base
+-compartilhada, mesmo padrão de libero_object_language.py.
++As 10 tarefas confirmadas rodando ao vivo (benchmark.get_benchmark_dict()
++["libero_object"]().get_task(i).language, i=0..9) -- não adivinhadas:
+ """
+ 
+-TASK_TEXTS_LIBERO_40 = {
+-    "open the middle drawer of the cabinet",
+-    "open the top drawer and put the bowl inside",
++TASK_TEXTS_LIBERO_OBJECT_10 = {
+     "pick up the alphabet soup and place it in the basket",
++    "pick up the cream cheese and place it in the basket",
++    "pick up the salad dressing and place it in the basket",
+     "pick up the bbq sauce and place it in the basket",
+-    "pick up the black bowl between the plate and the ramekin and place it on the plate",
+-    "pick up the black bowl from table center and place it on the plate",
+-    "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+-    "pick up the black bowl next to the cookie box and place it on the plate",
+-    "pick up the black bowl next to the plate and place it on the plate",
+-    "pick up the black bowl next to the ramekin and place it on the plate",
+-    "pick up the black bowl on the cookie box and place it on the plate",
+-    "pick up the black bowl on the ramekin and place it on the plate",
+-    "pick up the black bowl on the stove and place it on the plate",
+-    "pick up the black bowl on the wooden cabinet and place it on the plate",
+-    "pick up the book and place it in the back compartment of the caddy",
++    "pick up the ketchup and place it in the basket",
++    "pick up the tomato sauce and place it in the basket",
+     "pick up the butter and place it in the basket",
++    "pick up the milk and place it in the basket",  # a mesma da Fase 1
+     "pick up the chocolate pudding and place it in the basket",
+-    "pick up the cream cheese and place it in the basket",
+-    "pick up the ketchup and place it in the basket",
+-    "pick up the milk and place it in the basket",
+     "pick up the orange juice and place it in the basket",
+-    "pick up the salad dressing and place it in the basket",
+-    "pick up the tomato sauce and place it in the basket",
+-    "push the plate to the front of the stove",
+-    "put both moka pots on the stove",
+-    "put both the alphabet soup and the cream cheese box in the basket",
+-    "put both the alphabet soup and the tomato sauce in the basket",
+-    "put both the cream cheese box and the butter in the basket",
+-    "put the black bowl in the bottom drawer of the cabinet and close it",
+-    "put the bowl on the plate",
+-    "put the bowl on the stove",
+-    "put the bowl on top of the cabinet",
+-    "put the cream cheese in the bowl",
+-    "put the white mug on the left plate and put the yellow and white mug on the right plate",
+-    "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+-    "put the wine bottle on the rack",
+-    "put the wine bottle on top of the cabinet",
+-    "put the yellow and white mug in the microwave and close it",
+-    "turn on the stove",
+-    "turn on the stove and put the moka pot on it",
+ }
+ 
+-
+-def make_config(fusion_type: str) -> dict:
+-    assert fusion_type in ("token", "film", "cross_attn"), fusion_type
+-    return {
+-        "experiment_name": f"libero_v2_40tasks_lingua_{fusion_type}",
+-        "device_index": None,  # None = auto (GPU com mais memória livre)
+-        # dados
+-        "task_texts": TASK_TEXTS_LIBERO_40,
+-        "task_suite_name": "libero_40_mixed",  # não é suite oficial pura -- ver docstring
+-        "val_frac": 0.1,  # usado só se val_strategy="fraction"
+-        "val_strategy": "min_holdout",
+-        "n_val_per_task": 1,  # 40 tarefas -> 40 episódios de val (vs. 10 antes)
+-        "seed": 42,
+-        "obs_horizon": 1,
+-        "pred_horizon": 50,
+-        "batch_size": 32,
+-        # modelo -- idêntico à versão de 10 tarefas (mesma arquitetura,
+-        # só muda a quantidade de dado)
+-        "action_dim": 7,
+-        "state_dim": 8,
+-        "d_model": 512,
+-        "latent_dim": 32,
+-        "chunk_size": 50,
+-        "n_cameras": 2,
+-        "n_encoder_layers": 4,
+-        "n_decoder_layers": 4,
+-        "n_heads": 8,
+-        "dropout": 0.1,
+-        "freeze_bn": True,
+-        "decoder_style": "detr",
+-        "fusion_type": fusion_type,  # "token" | "film" | "cross_attn" -> build_fusion()
+-        # otimização
+-        "lr": 1e-4,
+-        "lr_backbone": 1e-5,
+-        "weight_decay": 1e-4,
+-        "num_epochs": 50,  # validação mais simples/rápida antes de comprometer com 300
+-        "kl_weight": 10.0,
+-        "kl_warmup_epochs": 10,  # annealing linear 0->kl_weight -- ver diagnóstico de 31/08 (decoder ignorando z)
+-        "free_bits": 0.05,  # reativado -- ver diagnóstico de colapso de posterior em 30/08
+-        "grad_clip_norm": 10.0,
+-        "checkpoint_every": 50,
+-        # rollout -- com 40 tarefas, ainda mais que a versão de 10: cada uma
+-        # precisa de env/task_id próprio (mesma ressalva das configs anteriores).
+-        "rollout_m": 0.01,
+-        "rollout_max_steps": 300,
+-        "rollout_n_episodes": 10,
+-    }
+-
+-
+-CONFIG_TOKEN = make_config("token")
+-CONFIG_FILM = make_config("film")
+-CONFIG_CROSS_ATTN = make_config("cross_attn")
+-
+-CONFIG = CONFIG_FILM
+\ No newline at end of file
++CONFIG = {
++    "experiment_name": "libero_v2_10tasks_sem_lingua",
++    "device_index": None,  # None = auto (GPU com mais memória livre).
++    # dados
++    "task_texts": TASK_TEXTS_LIBERO_OBJECT_10,
++    "task_suite_name": "libero_object",
++    "val_frac": 0.1,  # usado só se val_strategy="fraction"
++    "val_strategy": "min_holdout",  # "fraction" (Fase 1) | "min_holdout" (aqui)
++    "n_val_per_task": 1,  # reserva 1 episódio "nunca visto" por tarefa pra
++    # val -- com ~5 episódios/tarefa, isso deixa a métrica de validação
++    # comparável entre as 10 tarefas, maximizando o que sobra pro treino.
++    "seed": 42,
++    "obs_horizon": 1,
++    "pred_horizon": 50,
++    "batch_size": 32,
++    # modelo -- MESMA arquitetura da Fase 1 (sem fusão de linguagem: fusion=None
++    # no ACT continua o baseline; task_texts do batch são ignorados pelo modelo,
++    # só usados aqui pro filtro/split de dados)
++    "action_dim": 7,
++    "state_dim": 8,
++    "d_model": 512,
++    "latent_dim": 32,
++    "chunk_size": 50,
++    "n_cameras": 2,
++    "n_encoder_layers": 4,
++    "n_decoder_layers": 4,
++    "n_heads": 8,
++    "dropout": 0.1,
++    "freeze_bn": True,
++    "decoder_style": "torch",
++    # otimização
++    "lr": 1e-4,
++    "lr_backbone": 1e-5,
++    "weight_decay": 1e-4,
++    "num_epochs": 300,
++    "kl_weight": 10.0,
++    "free_bits": 0.05,
++    "grad_clip_norm": 10.0,
++    "checkpoint_every": 50,
++    # rollout -- COM 10 tarefas, cada uma precisa de env/task_id próprio;
++    # ver notebooks/02_rollout_libero.ipynb, célula precisa iterar por task
++    # (ainda não generalizado pra multi-task -- fazer antes do rollout da Fase 2)
++    "rollout_m": 0.01,
++    "rollout_max_steps": 300,
++    "rollout_n_episodes": 10,
++}
+diff --git a/configs/libero_single_task.py b/configs/libero_single_task.py
+index be6b8df..f0e3417 100644
+--- a/configs/libero_single_task.py
++++ b/configs/libero_single_task.py
+@@ -40,7 +40,6 @@ CONFIG = {
+     "kl_weight": 10.0,
+     "free_bits": 0.0,  # 0.0 = fiel ao KL cru do ACT oficial (sem free bits)
+     "grad_clip_norm": 10.0,
+-    "patience": 40,
+     "checkpoint_every": 50,
+     # rollout
+     "rollout_m": 0.01,
+diff --git a/notebooks/01_treino_libero.ipynb b/notebooks/01_treino_libero.ipynb
+index f8c518f..cc56a83 100644
+--- a/notebooks/01_treino_libero.ipynb
++++ b/notebooks/01_treino_libero.ipynb
+@@ -17,7 +17,32 @@
+    "execution_count": null,
+    "metadata": {},
+    "outputs": [],
+-   "source": "import torch\nfrom lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata\n\nfrom configs.libero_object_language import CONFIG_FILM as cfg\n# Outras fases/mecanismos -- troque a linha acima por:\n#   from configs.libero_single_task import CONFIG as cfg              # Fase 1\n#   from configs.libero_object_multitask import CONFIG as cfg         # Fase 2\n#   from configs.libero_object_language import CONFIG_TOKEN as cfg    # Fase 3, token\n#   from configs.libero_object_language import CONFIG_CROSS_ATTN as cfg  # Fase 3, cross-attn\nfrom act_lang.data.libero import (\n    REPO_ID, LiberoActBridge, filter_episodes_by_tasks, get_episode_task_labels,\n    make_delta_timestamps, split_episodes_min_holdout, split_episodes_stratified,\n)\nfrom act_lang.data.normalize import MinMaxNormalizer\n\nprint(describe_devices())\ndevice = pick_device(preferred_index=cfg.get(\"device_index\"))  # None = auto (mais memória livre)\nprint(f\"\\nusando: {device}\")"
++   "source": [
++    "import torch\n",
++    "from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata\n",
++    "\n",
++    "from configs.libero_object_language import CONFIG_FILM as cfg\n",
++    "# Outras fases/mecanismos -- troque a linha acima por:\n",
++    "#   from configs.libero_single_task import CONFIG as cfg              # Fase 1\n",
++    "#   from configs.libero_object_multitask import CONFIG as cfg         # Fase 2\n",
++    "#   from configs.libero_object_language import CONFIG_TOKEN as cfg    # Fase 3, token\n",
++    "#   from configs.libero_object_language import CONFIG_CROSS_ATTN as cfg  # Fase 3, cross-attn\n",
++    "from act_lang.data.libero import (\n",
++    "    REPO_ID, LiberoActBridge, filter_episodes_by_tasks, get_episode_task_labels,\n",
++    "    make_delta_timestamps, split_episodes_min_holdout, split_episodes_stratified,\n",
++    ")\n",
++    "from act_lang.data.normalize import MinMaxNormalizer\n",
++    "\n",
++    "print(describe_devices())\n",
++    "device = pick_device(preferred_index=cfg.get(\"device_index\"))  # None = auto (mais memória livre)\n",
++    "print(f\"\\nusando: {device}\")\n",
++    "\n",
++    "# Seed GLOBAL (pesos, dropout, z, shuffle) -- o seed do config controlava\n",
++    "# só o split de episódios. Para a comparação entre mecanismos de fusão,\n",
++    "# rode 2-3 seeds por mecanismo e reporte média ± desvio.\n",
++    "from act_lang.utils.runtime import set_seed\n",
++    "set_seed(cfg[\"seed\"])"
++   ]
+   },
+   {
+    "cell_type": "code",
+@@ -123,7 +148,19 @@
+     "pred, mu, logvar = model(images, state, actions=actions, is_pad=is_pad, task_texts=task_texts)\n",
+     "loss, recon, kld = act_loss(pred, actions, mu, logvar, is_pad, cfg[\"kl_weight\"], cfg[\"free_bits\"])\n",
+     "loss.backward(); optimizer.zero_grad()\n",
+-    "print(f\"loss {loss.item():.4f} | recon {recon.item():.4f} | kld {kld.item():.4f}\")"
++    "print(f\"loss {loss.item():.4f} | recon {recon.item():.4f} | kld {kld.item():.4f}\")\n",
++    "\n",
++    "# Sanity check da cross-attention REAL (os testes unitários stubam o\n",
++    "# sentence-transformer; aqui é o encoder de verdade): a instrução precisa\n",
++    "# virar VÁRIOS tokens de linguagem -- com 1 key a atenção degenera em\n",
++    "# softmax(1 logito)=1.0, deslocamento uniforme, e a comparação entre\n",
++    "# mecanismos perde o sentido (ver docstring de cross_attn.py).\n",
++    "from act_lang.models.fusion.cross_attn import CrossAttentionFusion\n",
++    "if isinstance(getattr(model, \"fusion\", None), CrossAttentionFusion):\n",
++    "    lang_tokens, pad_mask = model.fusion.encode_text(list(task_texts[:2]), device)\n",
++    "    n_reais = int((~pad_mask[0]).sum())\n",
++    "    print(f\"cross-attn: {n_reais} tokens de linguagem reais (shape {tuple(lang_tokens.shape)})\")\n",
++    "    assert lang_tokens.shape[1] > 1, \"cross-attention com key única -- degenerada!\"\n"
+    ]
+   },
+   {
+@@ -137,20 +174,39 @@
+     "print(f\"checkpoints em: {checkpoint_dir}\")\n",
+     "\n",
+     "from act_lang.training.loop import fit\n",
++    "from act_lang.training.checkpoints import load_checkpoint\n",
++    "\n",
++    "# O scaler é criado AQUI (não dentro do fit) para o estado dele poder ser\n",
++    "# restaurado no resume -- sem isso, cada sessão caída do Colab reiniciava o\n",
++    "# warmup do AMP (scale volta a 65536, primeiros steps pulados por overflow).\n",
++    "scaler = torch.amp.GradScaler(enabled=(device.type == \"cuda\"))\n",
+     "\n",
+-    "# retomar de sessão caída:\n",
+-    "#   from act_lang.training.checkpoints import load_checkpoint\n",
+-    "#   start_epoch, history = load_checkpoint(\n",
+-    "#       checkpoint_dir / \"last_checkpoint.pt\", model, optimizer, device)\n",
+-    "#   e passe start_epoch=start_epoch, history=history ao fit(...)\n",
++    "# RESUME: mude para True quando a sessão do Colab cair no meio do treino.\n",
++    "# Restaura modelo + optimizer + scaler + history do last_checkpoint.pt\n",
++    "# (escrita atômica: sobrevive a interrupção no meio do save) e o ranking\n",
++    "# top-3 é reconstruído dos best_*.pt já no Drive, dentro do fit.\n",
++    "RESUME = False\n",
++    "start_epoch, history = 0, None\n",
++    "last_ckpt = checkpoint_dir / \"last_checkpoint.pt\"\n",
++    "if RESUME:\n",
++    "    if last_ckpt.exists():\n",
++    "        start_epoch, history = load_checkpoint(\n",
++    "            last_ckpt, model, optimizer, device, scaler=scaler\n",
++    "        )\n",
++    "        print(f\"retomando de {last_ckpt} -> start_epoch={start_epoch}\")\n",
++    "    else:\n",
++    "        print(f\"RESUME=True, mas {last_ckpt} não existe -- começando do zero.\")\n",
+     "\n",
+     "history = fit(\n",
+     "    model, train_loader, val_loader, bridge, optimizer, device,\n",
+     "    checkpoint_dir=checkpoint_dir, num_epochs=cfg[\"num_epochs\"],\n",
+-    "    kl_weight=cfg[\"kl_weight\"], free_bits=cfg[\"free_bits\"],\n",
+-    "    grad_clip_norm=cfg[\"grad_clip_norm\"], patience=cfg[\"patience\"],\n",
++    "    kl_weight=cfg[\"kl_weight\"],\n",
++    "    kl_warmup_epochs=cfg.get(\"kl_warmup_epochs\", 0),\n",
++    "    free_bits=cfg[\"free_bits\"],\n",
++    "    grad_clip_norm=cfg[\"grad_clip_norm\"],\n",
+     "    checkpoint_every=cfg[\"checkpoint_every\"],\n",
+-    ")"
++    "    start_epoch=start_epoch, history=history, scaler=scaler,\n",
++    ")\n"
+    ]
+   },
+   {
+@@ -202,4 +258,4 @@
+  },
+  "nbformat": 4,
+  "nbformat_minor": 0
+-}
+\ No newline at end of file
++}
+diff --git a/scripts/train.py b/scripts/train.py
+index 8df3591..e8ccbcd 100644
+--- a/scripts/train.py
++++ b/scripts/train.py
+@@ -41,7 +41,7 @@ from act_lang.models.fusion import build_fusion
+ from act_lang.training.checkpoints import load_checkpoint
+ from act_lang.training.loop import fit
+ from act_lang.training.optim import build_optimizer
+-from act_lang.utils.runtime import describe_devices, get_checkpoint_dir, pick_device
++from act_lang.utils.runtime import describe_devices, get_checkpoint_dir, pick_device, set_seed
+ 
+ # nome CLI -> (módulo em configs/, atributo do dict CONFIG dentro dele)
+ CONFIG_REGISTRY = {
+@@ -85,6 +85,10 @@ def build_data(cfg: dict, device: torch.device):
+     train_dataset = LeRobotDataset(REPO_ID, episodes=train_ids, delta_timestamps=delta_ts)
+     val_dataset = LeRobotDataset(REPO_ID, episodes=val_ids, delta_timestamps=delta_ts)
+ 
++    # num_workers=0 é DELIBERADO no Colab: workers com decodificação de
++    # vídeo (fork + ffmpeg do lerobot) travam/vazam no runtime deles. Fora
++    # do Colab, subir para 2-4 workers tende a destravar a GPU (os frames
++    # vêm de vídeo; com 0, a T4 espera a CPU decodificar amostra a amostra).
+     train_loader = torch.utils.data.DataLoader(
+         train_dataset, batch_size=cfg["batch_size"], shuffle=True,
+         num_workers=0, drop_last=True,
+@@ -137,6 +141,8 @@ def main() -> None:
+     device = pick_device(preferred_index=cfg.get("device_index"))
+     print(f"usando: {device}")
+ 
++    set_seed(cfg["seed"])  # pesos, dropout, z, shuffle -- não só o split
++
+     train_loader, val_loader, bridge = build_data(cfg, device)
+     model, optimizer = build_model_and_optimizer(cfg, device)
+ 
+@@ -144,11 +150,15 @@ def main() -> None:
+     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+     print(f"checkpoints em: {checkpoint_dir}")
+ 
++    scaler = torch.amp.GradScaler(enabled=(device.type == "cuda"))
++
+     start_epoch, history = 0, None
+     last_ckpt = checkpoint_dir / "last_checkpoint.pt"
+     if args.resume:
+         if last_ckpt.exists():
+-            start_epoch, history = load_checkpoint(last_ckpt, model, optimizer, device)
++            start_epoch, history = load_checkpoint(
++                last_ckpt, model, optimizer, device, scaler=scaler
++            )
+             print(f"retomando de {last_ckpt} -> start_epoch={start_epoch}")
+         else:
+             print(f"--resume passado, mas {last_ckpt} não existe -- começando do zero.")
+@@ -156,9 +166,11 @@ def main() -> None:
+     fit(
+         model, train_loader, val_loader, bridge, optimizer, device,
+         checkpoint_dir=checkpoint_dir, num_epochs=cfg["num_epochs"],
+-        kl_weight=cfg["kl_weight"], free_bits=cfg["free_bits"],
++        kl_weight=cfg["kl_weight"],
++        kl_warmup_epochs=cfg.get("kl_warmup_epochs", 0),  # antes: silenciosamente ignorado
++        free_bits=cfg["free_bits"],
+         grad_clip_norm=cfg["grad_clip_norm"], checkpoint_every=cfg["checkpoint_every"],
+-        start_epoch=start_epoch, history=history,
++        start_epoch=start_epoch, history=history, scaler=scaler,
+     )
+ 
+ 
+diff --git a/src/act_lang/data/libero.py b/src/act_lang/data/libero.py
+index 7575528..e409a90 100644
+--- a/src/act_lang/data/libero.py
++++ b/src/act_lang/data/libero.py
+@@ -166,6 +166,16 @@ def split_episodes_min_holdout(
+ 
+ 
+ def make_delta_timestamps(fps: float, obs_horizon: int = 1, pred_horizon: int = 50) -> dict:
++    # O LiberoActBridge assume obs_horizon=1 (imagens SEM dimensão temporal,
++    # comportamento observado do lerobot nesse caso). Com obs_horizon>1 o
++    # stack das câmeras viraria (B, 2, T, C, H, W) e o ACT quebraria -- ou
++    # pior, falharia de forma confusa. Falhar alto aqui, no ponto único de
++    # consumo do parâmetro, até o bridge tratar a dimensão temporal.
++    assert obs_horizon == 1, (
++        f"obs_horizon={obs_horizon} não suportado: o LiberoActBridge assume "
++        "obs_horizon=1 (sem dimensão temporal nas imagens). Ajuste o config "
++        "ou estenda o bridge antes de mudar isso."
++    )
+     return {
+         "observation.images.image": [-i / fps for i in reversed(range(obs_horizon))],
+         "observation.images.image2": [-i / fps for i in reversed(range(obs_horizon))],
+diff --git a/src/act_lang/eval/rollout_libero.py b/src/act_lang/eval/rollout_libero.py
+index 570c2ca..592a0c9 100644
+--- a/src/act_lang/eval/rollout_libero.py
++++ b/src/act_lang/eval/rollout_libero.py
+@@ -43,6 +43,18 @@ def temporal_ensemble(action_buffer: deque, m: float) -> np.ndarray:
+     return weights @ preds
+ 
+ 
++def _video_frame(raw_obs: dict) -> np.ndarray:
++    """Frame lado a lado das 2 câmeras, com o MESMO flip de 180° aplicado à
++    entrada do modelo (ver obs_processing) — os pixels crus do env vêm
++    invertidos em relação à convenção do dataset; sem o flip, os vídeos de
++    inspeção de falhas (a razão de eles existirem) saíam de cabeça pra baixo.
++    """
++    frame = np.concatenate(
++        [raw_obs["pixels"]["image"], raw_obs["pixels"]["image2"]], axis=1
++    )
++    return frame[::-1, ::-1]  # 180°: inverte H e W, canais intactos
++
++
+ @torch.no_grad()
+ def rollout_libero(
+     model,
+@@ -83,9 +95,7 @@ def rollout_libero(
+         # de física/render (não reposiciona objetos).
+         env.init_state_id = state_id
+         raw_obs, info = env.reset(seed=seed_start + ep)
+-        frames = [np.concatenate(
+-            [raw_obs["pixels"]["image"], raw_obs["pixels"]["image2"]], axis=1
+-        )]
++        frames = [_video_frame(raw_obs)]
+         action_buffer: deque = deque(maxlen=model.chunk_size)
+ 
+         for step in range(max_steps):
+@@ -101,9 +111,7 @@ def rollout_libero(
+             raw_obs, reward, terminated, truncated, info = env.step(
+                 action.astype(np.float32)
+             )
+-            frames.append(np.concatenate(
+-                [raw_obs["pixels"]["image"], raw_obs["pixels"]["image2"]], axis=1
+-            ))
++            frames.append(_video_frame(raw_obs))
+             if terminated or truncated:
+                 break
+ 
+diff --git a/src/act_lang/models/fusion/base.py b/src/act_lang/models/fusion/base.py
+index 2234779..a4d0a46 100644
+--- a/src/act_lang/models/fusion/base.py
++++ b/src/act_lang/models/fusion/base.py
+@@ -7,7 +7,10 @@ arquivo neste pacote e implementa esta interface.
+ 
+ Contrato:
+   - `encode_text(texts)` transforma a lista de strings do batch em uma
+-    representação de linguagem (ex.: embeddings de um encoder congelado).
++    representação de linguagem. O retorno é um objeto OPACO para quem chama
++    (o ACT só o repassa ao fuse do mesmo mecanismo): pode ser um tensor
++    (token/FiLM) ou uma tupla (tensor, máscara) (cross-attention, que
++    precisa da key_padding_mask junto).
+   - `fuse(obs_tokens, lang)` injeta a linguagem nos tokens de observação do
+     transformer encoder e devolve os tokens (possivelmente com comprimento
+     diferente, ex.: +1 token de linguagem no modo "token simples").
+@@ -23,9 +26,12 @@ import torch.nn as nn
+ 
+ class LanguageFusion(nn.Module, ABC):
+     @abstractmethod
+-    def encode_text(self, texts: list[str], device: torch.device) -> torch.Tensor:
+-        """(lista de B strings) -> representação de linguagem, ex. (B, L, d) ou (B, d)."""
++    def encode_text(self, texts: list[str], device: torch.device):
++        """(lista de B strings) -> representação de linguagem (objeto opaco:
++        tensor (B, d)/(B, L, d) ou tupla (tensor, máscara) -- cada mecanismo
++        define o próprio formato; só o fuse() do MESMO mecanismo o consome)."""
+ 
+     @abstractmethod
+-    def fuse(self, obs_tokens: torch.Tensor, lang: torch.Tensor) -> torch.Tensor:
+-        """(B, N, d_model), lang -> (B, N', d_model) com a linguagem incorporada."""
++    def fuse(self, obs_tokens: torch.Tensor, lang) -> torch.Tensor:
++        """(B, N, d_model), lang (saída do encode_text deste mecanismo) ->
++        (B, N', d_model) com a linguagem incorporada."""
+diff --git a/src/act_lang/models/fusion/cross_attn.py b/src/act_lang/models/fusion/cross_attn.py
+index 058a9ea..436b297 100644
+--- a/src/act_lang/models/fusion/cross_attn.py
++++ b/src/act_lang/models/fusion/cross_attn.py
+@@ -4,10 +4,21 @@ antes do transformer encoder principal processar tudo junto.
+ 
+ O mais expressivo dos três: diferente do FiLM (mesma modulação gamma/beta
+ pra todos os tokens) e do TokenFusion (encoder aprende a usar 1 token
+-extra por conta própria), aqui cada token pode atender à linguagem de
+-forma DIFERENTE dos demais -- o token da imagem perto da cesta pode
+-"prestar mais atenção" na instrução do que o token do canto vazio da mesa,
+-por exemplo. `fuse()` preserva o número de tokens (N -> N), como o FiLM.
++extra por conta própria), aqui cada token de observação pode atender à
++linguagem de forma DIFERENTE dos demais -- o token da imagem perto da
++cesta pode "prestar mais atenção" em "basket" enquanto o token sobre o
++leite atende a "milk". `fuse()` preserva o número de tokens (N -> N),
++como o FiLM.
++
++CORREÇÃO (set/2026) -- degenerescência com key única: a versão anterior
++usava o embedding POOLED da frase como key/value único. Atenção sobre 1
++key é softmax de 1 logito = 1.0 sempre, independente da query -> o
++"attended" saía IDÊNTICO para todos os tokens de observação, colapsando o
++mecanismo num deslocamento aditivo uniforme (um FiLM só-de-beta, mais
++caro). Agora a instrução entra como sequência de embeddings POR TOKEN
++(via TextEmbeddingCache.encode_tokens), com key_padding_mask para os
++comprimentos variados do batch -- a atenção volta a ter sobre o que
++distribuir peso, que é a hipótese que este mecanismo existe pra testar.
+ """
+ 
+ import torch
+@@ -31,10 +42,33 @@ class CrossAttentionFusion(LanguageFusion):
+         self.cross_attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+         self.norm = nn.LayerNorm(d_model)
+ 
+-    def encode_text(self, texts: list[str], device: torch.device) -> torch.Tensor:
+-        raw = self._text_encoder.encode(texts, device)  # (B, text_embed_dim)
+-        return self.proj(raw).unsqueeze(1)  # (B, 1, d_model) -- "memory" de 1 token
++    def encode_text(
++        self, texts: list[str], device: torch.device
++    ) -> tuple[torch.Tensor, torch.Tensor]:
++        """Retorna (lang_tokens, key_padding_mask).
++
++        lang_tokens: (B, L, d_model) -- um token de linguagem por token da
++        frase, projetado pra d_model. key_padding_mask: (B, L) bool, True
++        onde é padding (convenção do nn.MultiheadAttention). O par viaja
++        junto até o fuse() -- o ACT trata o retorno como objeto opaco.
++        """
++        raw, pad_mask = self._text_encoder.encode_tokens(texts, device)  # sem gradiente
++        return self.proj(raw), pad_mask  # projeção treinável, (B, L, d_model)
++
++    def attend(
++        self, obs_tokens: torch.Tensor, lang: tuple[torch.Tensor, torch.Tensor]
++    ) -> torch.Tensor:
++        """Só a leitura da linguagem (sem residual/norm) -- isolado para
++        diagnóstico e teste: com L>1 keys, a saída DEVE variar entre tokens
++        de observação com conteúdos distintos (não-degenerescência)."""
++        lang_tokens, pad_mask = lang
++        attended, _ = self.cross_attn(
++            query=obs_tokens, key=lang_tokens, value=lang_tokens,
++            key_padding_mask=pad_mask,
++        )
++        return attended
+ 
+-    def fuse(self, obs_tokens: torch.Tensor, lang: torch.Tensor) -> torch.Tensor:
+-        attended, _ = self.cross_attn(query=obs_tokens, key=lang, value=lang)
+-        return self.norm(obs_tokens + attended)  # residual + norm
++    def fuse(
++        self, obs_tokens: torch.Tensor, lang: tuple[torch.Tensor, torch.Tensor]
++    ) -> torch.Tensor:
++        return self.norm(obs_tokens + self.attend(obs_tokens, lang))  # residual + norm
+diff --git a/src/act_lang/models/fusion/text_encoder.py b/src/act_lang/models/fusion/text_encoder.py
+index 5c9df75..0fcba4e 100644
+--- a/src/act_lang/models/fusion/text_encoder.py
++++ b/src/act_lang/models/fusion/text_encoder.py
+@@ -48,6 +48,7 @@ class TextEmbeddingCache:
+         self.model_name = model_name
+         self._st_model = None
+         self._cache: dict[str, torch.Tensor] = {}
++        self._token_cache: dict[str, torch.Tensor] = {}
+ 
+     def _ensure_loaded(self):
+         if self._st_model is None:
+@@ -63,3 +64,47 @@ class TextEmbeddingCache:
+             for t, e in zip(uncached, embs):
+                 self._cache[t] = e.detach().cpu()  # cache em CPU; move pro device no uso
+         return torch.stack([self._cache[t] for t in texts]).to(device)
++
++    @torch.no_grad()
++    def encode_tokens(
++        self, texts: list[str], device: torch.device
++    ) -> tuple[torch.Tensor, torch.Tensor]:
++        """(lista de B strings) -> (tokens, key_padding_mask), sem gradiente.
++
++        tokens: (B, L_max, embed_dim) -- embeddings POR TOKEN da frase (saída
++        token-level do sentence-transformer, inclui tokens especiais), com
++        padding de zeros até o comprimento máximo do batch.
++        key_padding_mask: (B, L_max) bool, True = posição de padding --
++        convenção do nn.MultiheadAttention (True é ignorado na atenção).
++
++        Motivação (correção da cross-attention degenerada): com o embedding
++        pooled único, a atenção tinha 1 key -> softmax de 1 logit = 1.0,
++        independente da query; o "attended" saía idêntico para todos os
++        tokens de observação. Com os embeddings por token, a instrução vira
++        múltiplas keys/values e cada token de observação pode de fato
++        atender a partes diferentes dela ("milk" vs "basket").
++
++        Cache por string exata, como no encode(): vocabulário do LIBERO é
++        pequeno e fixo, não faz sentido recomputar a cada batch.
++        """
++        self._ensure_loaded()
++        uncached = [t for t in texts if t not in self._token_cache]
++        if uncached:
++            # output_value="token_embeddings": lista de tensores (L_i, dim),
++            # um por frase, comprimentos variados.
++            embs = self._st_model.encode(
++                uncached, convert_to_tensor=True, output_value="token_embeddings"
++            )
++            for t, e in zip(uncached, embs):
++                self._token_cache[t] = e.detach().cpu()
++
++        seqs = [self._token_cache[t] for t in texts]
++        lengths = [s.size(0) for s in seqs]
++        l_max = max(lengths)
++        embed_dim = seqs[0].size(1)
++        tokens = torch.zeros(len(texts), l_max, embed_dim)
++        mask = torch.ones(len(texts), l_max, dtype=torch.bool)  # True = padding
++        for i, (s, length) in enumerate(zip(seqs, lengths)):
++            tokens[i, :length] = s
++            mask[i, :length] = False
++        return tokens.to(device), mask.to(device)
+diff --git a/src/act_lang/models/positional.py b/src/act_lang/models/positional.py
+index 7ff9299..8d973f2 100644
+--- a/src/act_lang/models/positional.py
++++ b/src/act_lang/models/positional.py
+@@ -24,13 +24,25 @@ class PositionalEncoding1D(nn.Module):
+         return x + self.pe[:, : x.size(1)]
+ 
+ 
++_SINCOS_2D_CACHE: dict = {}
++
++
+ def build_2d_sincos_position_embedding(
+     h: int, w: int, d_model: int, device: torch.device
+ ) -> torch.Tensor:
+     """Embedding 2D sincos para os tokens espaciais do backbone visual.
+ 
+     Retorna (1, h*w, d_model), pronto para somar aos tokens achatados.
++
++    Cache por (h, w, d_model, device): é determinístico e (h, w) são fixos
++    dado o tamanho de entrada — recomputar por câmera a cada forward era
++    trabalho idêntico jogado fora. O tensor cacheado nunca recebe gradiente
++    (é somado como constante), então compartilhá-lo entre forwards é seguro.
+     """
++    key = (h, w, d_model, str(device))
++    cached = _SINCOS_2D_CACHE.get(key)
++    if cached is not None:
++        return cached
+     assert d_model % 4 == 0, "d_model precisa ser múltiplo de 4 para o sincos 2D"
+     eps = 1e-6
+     scale = 2 * math.pi
+@@ -47,5 +59,6 @@ def build_2d_sincos_position_embedding(
+     out_y = grid_y.flatten()[:, None] * omega[None, :]
+     pe = torch.cat(
+         [torch.sin(out_x), torch.cos(out_x), torch.sin(out_y), torch.cos(out_y)], dim=1
+-    )
+-    return pe.unsqueeze(0)
++    ).unsqueeze(0)
++    _SINCOS_2D_CACHE[key] = pe
++    return pe
+diff --git a/src/act_lang/training/checkpoints.py b/src/act_lang/training/checkpoints.py
+index 480ff78..0cf474b 100644
+--- a/src/act_lang/training/checkpoints.py
++++ b/src/act_lang/training/checkpoints.py
+@@ -1,44 +1,112 @@
+ """Salvamento/retomada de checkpoints e ranking top-k.
+ 
+-CORREÇÃO aplicada: `load_checkpoint` retorna `epoch + 1` como start_epoch —
+-o notebook original re-executava a época já salva ao retomar (off-by-one).
++CORREÇÕES aplicadas:
++  - `load_checkpoint` retorna `epoch + 1` como start_epoch — o notebook
++    original re-executava a época já salva ao retomar (off-by-one).
++  - Escrita ATÔMICA (tmp + os.replace): se a sessão do Colab morrer no meio
++    do torch.save do last_checkpoint.pt, o arquivo anterior sobrevive
++    intacto e o --resume continua funcionando. Sem isso, a interrupção
++    corrompe exatamente o arquivo que existe pra proteger contra interrupção.
++  - Estado do GradScaler entra no checkpoint (e é restaurado no resume):
++    sem ele, cada retomada zera o scale pro valor inicial e re-faz o warmup
++    do AMP — steps pulados por overflow logo após cada resume.
++  - Checkpoints "best" salvam SÓ o modelo (optimizer=None): o estado do
++    AdamW (~2 buffers por parâmetro) triplica o tamanho do arquivo e só é
++    necessário pra retomar treino — o que se faz pelo last_checkpoint.pt,
++    nunca por um best.
++  - `scan_top_k` reconstrói o ranking a partir dos arquivos best_*.pt já
++    no disco — no resume, os bests de antes da interrupção voltam a
++    participar da poda (antes, a lista nascia vazia e os arquivos antigos
++    acumulavam pra sempre).
+ """
+ 
++import os
++import re
+ from pathlib import Path
+ 
+ import torch
+ 
+ 
+-def save_checkpoint(path: Path, epoch: int, model, optimizer, history: dict) -> None:
+-    torch.save(
+-        {
+-            "epoch": epoch,
+-            "model_state_dict": model.state_dict(),
+-            "optimizer_state_dict": optimizer.state_dict(),
+-            "history": history,
+-        },
+-        path,
+-    )
++def save_checkpoint(
++    path: Path, epoch: int, model, optimizer=None, history: dict | None = None,
++    scaler=None,
++) -> None:
++    """Escrita atômica: serializa em `path.tmp` e move por cima com
++    os.replace (rename atômico no mesmo filesystem)."""
++    payload = {
++        "epoch": epoch,
++        "model_state_dict": model.state_dict(),
++        "history": history if history is not None else {},
++    }
++    if optimizer is not None:
++        payload["optimizer_state_dict"] = optimizer.state_dict()
++    if scaler is not None:
++        payload["scaler_state_dict"] = scaler.state_dict()
++
++    tmp_path = Path(str(path) + ".tmp")
++    torch.save(payload, tmp_path)
++    os.replace(tmp_path, path)
+ 
+ 
+-def load_checkpoint(path: Path, model, optimizer=None, device="cpu") -> tuple[int, dict]:
+-    """Retorna (start_epoch, history) — start_epoch é a PRÓXIMA época a rodar."""
++def load_checkpoint(
++    path: Path, model, optimizer=None, device="cpu", scaler=None
++) -> tuple[int, dict]:
++    """Retorna (start_epoch, history) — start_epoch é a PRÓXIMA época a rodar.
++
++    `optimizer`/`scaler` são restaurados se passados E presentes no arquivo
++    (checkpoints antigos, de antes do scaler entrar no payload, seguem
++    carregáveis — o scaler só fica sem restaurar, com um aviso).
++    """
+     ckpt = torch.load(path, map_location=device, weights_only=False)
+     model.load_state_dict(ckpt["model_state_dict"])
+-    if optimizer is not None:
++    if optimizer is not None and "optimizer_state_dict" in ckpt:
+         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
++    if scaler is not None:
++        if "scaler_state_dict" in ckpt:
++            scaler.load_state_dict(ckpt["scaler_state_dict"])
++        else:
++            print("aviso: checkpoint sem estado do GradScaler (formato antigo) "
++                  "-- scaler reinicia do zero, warmup do AMP se repete.")
+     return ckpt["epoch"] + 1, ckpt["history"]
+ 
+ 
++def scan_top_k(checkpoint_dir: Path, metric_name: str = "z0", k: int = 3) -> list:
++    """Reconstrói a lista top-k [(valor, Path), ...] a partir dos arquivos
++    best_*.pt existentes em `checkpoint_dir` (para resume). Arquivos além
++    dos k melhores são podados na hora, mantendo o disco consistente.
++
++    A regex é construída COM o metric_name (não genérica): no formato de
++    nome `best_epoch{e:03d}_{metric_name}{valor:.4f}.pt` não há separador
++    entre nome e valor, e "z0" termina em dígito — um split genérico
++    engoliria o "0" do nome como parte do valor. Ancorar no nome conhecido
++    é inambíguo e lê também os arquivos de runs antigas (mesmo formato).
++    """
++    best_re = re.compile(
++        rf"best_epoch(\d+)_{re.escape(metric_name)}([\d.]+)\.pt$"
++    )
++    found = []
++    for f in sorted(Path(checkpoint_dir).glob("best_epoch*.pt")):
++        m = best_re.search(f.name)
++        if m:
++            found.append((float(m.group(2)), f))
++    found.sort(key=lambda x: x[0])
++    for _, extra in found[k:]:  # poda o excedente herdado de runs anteriores
++        extra.unlink(missing_ok=True)
++    return found[:k]
++
++
+ def save_top_k_checkpoint(
+-    checkpoint_dir: Path, epoch: int, metric_value: float, model, optimizer,
++    checkpoint_dir: Path, epoch: int, metric_value: float, model,
+     history: dict, top_k_list: list, k: int = 3, metric_name: str = "z0",
+ ) -> list:
++    """Insere este checkpoint no ranking e poda além de k. A DECISÃO de
++    salvar (métrica melhor que o pior do top-k atual, ou lista incompleta)
++    é de quem chama — ver fit(). Best NÃO carrega optimizer (ver módulo)."""
+     fname = checkpoint_dir / f"best_epoch{epoch:03d}_{metric_name}{metric_value:.4f}.pt"
+-    save_checkpoint(fname, epoch, model, optimizer, history)
++    save_checkpoint(fname, epoch, model, optimizer=None, history=history)
+     top_k_list.append((metric_value, fname))
+     top_k_list.sort(key=lambda x: x[0])
+-    if len(top_k_list) > k:
++    while len(top_k_list) > k:
+         _, removed_fname = top_k_list.pop()
+         if removed_fname.exists():
+             removed_fname.unlink()
+diff --git a/src/act_lang/training/loop.py b/src/act_lang/training/loop.py
+index 861355e..b407d8c 100644
+--- a/src/act_lang/training/loop.py
++++ b/src/act_lang/training/loop.py
+@@ -11,6 +11,25 @@ CORREÇÕES aplicadas em relação ao notebook:
+     roda `num_epochs` fixas, sem early stopping (train_bc em
+     imitate_episodes.py também não para antes da hora).
+ 
++CORREÇÕES (set/2026):
++  - Top-k DE VERDADE: um checkpoint entra no ranking sempre que sua métrica
++    é melhor que a do PIOR membro atual (ou o ranking está incompleto) — não
++    apenas em novo recorde global. Antes, a época com o 2º melhor valor da
++    corrida inteira era descartada se não tivesse sido recorde no momento em
++    que ocorreu (ex: sequência 5.0 -> 4.0 -> 4.1 guardava 5.0 e 4.0, nunca
++    4.1). Como o fluxo é escolher checkpoints pra rollout DEPOIS, o conjunto
++    de candidatos nascia errado.
++  - Resume completo: estado do GradScaler viaja no checkpoint, e o ranking
++    top-k é reconstruído dos arquivos best_*.pt no disco (scan_top_k) — ver
++    checkpoints.py.
++  - evaluate() com agregação PONDERADA (somas acumuladas / divisão única no
++    final): média-de-médias por batch enviesava com último batch menor e
++    padding variável. recon/recon_z0 usam soma de erro / soma de elementos
++    válidos; loss/kld/mu_abs_mean são ponderados pelo nº de amostras.
++  - evaluate() roda sob autocast (mesma precisão do treino, ~metade do custo
++    na T4 — são DOIS forwards por batch) e restaura o modo (train/eval) em
++    que o modelo estava, em vez de forçar train() incondicional.
++
+ MUDANÇA (Fase 2, opcional): `fit(..., val_loader=None)` treina com TODOS os
+ dados (sem held-out). Justificativa: com poucos episódios por tarefa (~5,
+ 10 tarefas), um split de validação fica pequeno demais pra ser um sinal
+@@ -21,6 +40,12 @@ offline: o treino roda por `num_epochs` fixo, salvando checkpoints
+ periódicos: a AVALIAÇÃO de qual é o melhor passa a ser feita depois, via
+ rollout real (ver eval/rollout_libero.py), não aqui.
+ 
++USO DO VAL (registro de método): val_recon_z0 é um FILTRO de candidatos, não
++um veredito — a correlação entre métrica offline e taxa de sucesso em
++rollout é fraca (robomimic, Mandlekar et al. 2021). Decida entre os top-k e
++o last por rollout, com init_state_ids fixos e compartilhados entre
++experimentos (ver eval/rollout_libero.py).
++
+ DIAGNÓSTICO: `mu_abs_mean` (|mu| médio do posterior) é logado em cada época,
+ treino e val. Motivação: no treino do LIBERO tarefa única, as curvas
+ `val (z=mu)` e `val (z=0)` ficaram sobrepostas do início ao fim -- sinal de
+@@ -35,11 +60,13 @@ from typing import Callable
+ 
+ import torch
+ 
+-from .checkpoints import save_checkpoint, save_top_k_checkpoint
+-from .loss import act_loss, kl_weight_schedule, masked_l1
++from .checkpoints import save_checkpoint, save_top_k_checkpoint, scan_top_k
++from .loss import act_loss, kl_weight_schedule, masked_l1_sums
+ 
+ Bridge = Callable  # (batch, device) -> (images, state, actions, is_pad, task_texts)
+ 
++TOP_K = 3
++
+ 
+ def train_one_epoch(
+     model, loader, bridge: Bridge, optimizer, scaler, device,
+@@ -76,34 +103,55 @@ def train_one_epoch(
+ 
+ @torch.no_grad()
+ def evaluate(model, loader, bridge: Bridge, device, kl_weight: float, free_bits: float) -> dict:
+-    """Passada única: métricas com z=mu (determinístico) e recon com z=0."""
++    """Passada única: métricas com z=mu (determinístico) e recon com z=0.
++
++    Agregação ponderada (ver docstring do módulo): recon e recon_z0 por soma
++    de erro / soma de elementos válidos; loss, kld e mu_abs_mean ponderados
++    por nº de amostras. Restaura o modo (train/eval) de entrada ao sair.
++    """
++    was_training = model.training
+     model.eval()
+-    sums = {"loss": 0.0, "recon": 0.0, "kld": 0.0, "recon_z0": 0.0, "mu_abs_mean": 0.0}
+-    n_batches = 0
++    err_sum = err_z0_sum = 0.0
++    n_valid = n_valid_z0 = 0
++    loss_sum = kld_sum = mu_sum = 0.0
++    n_samples = 0
+     for batch in loader:
+         images, state, actions, is_pad, task_texts = bridge(batch, device)
++        bsz = images.size(0)
+ 
+-        # posterior determinístico (z = mu)
+-        pred_actions, mu, logvar = model(
+-            images, state, actions=actions, is_pad=is_pad,
+-            task_texts=task_texts, sample_posterior=False,
+-        )
+-        loss, recon, kld = act_loss(
+-            pred_actions, actions, mu, logvar, is_pad, kl_weight, free_bits
+-        )
++        with torch.amp.autocast(device_type=device.type, enabled=(device.type == "cuda")):
++            # posterior determinístico (z = mu)
++            pred_actions, mu, logvar = model(
++                images, state, actions=actions, is_pad=is_pad,
++                task_texts=task_texts, sample_posterior=False,
++            )
++            loss, _, kld = act_loss(
++                pred_actions, actions, mu, logvar, is_pad, kl_weight, free_bits
++            )
++            e, n = masked_l1_sums(pred_actions, actions, is_pad)
+ 
+-        # inferência real (z = 0) — a métrica que prevê o rollout
+-        pred_z0, _, _ = model(images, state, actions=None, task_texts=task_texts)
+-        recon_z0 = masked_l1(pred_z0, actions, is_pad)
++            # inferência real (z = 0) — a métrica que prevê o rollout
++            pred_z0, _, _ = model(images, state, actions=None, task_texts=task_texts)
++            e_z0, n_z0 = masked_l1_sums(pred_z0, actions, is_pad)
+ 
+-        sums["loss"] += loss.item()
+-        sums["recon"] += recon.item()
+-        sums["kld"] += kld.item()
+-        sums["recon_z0"] += recon_z0.item()
+-        sums["mu_abs_mean"] += mu.abs().mean().item()
+-        n_batches += 1
+-    model.train()
+-    return {k: v / n_batches for k, v in sums.items()}
++        err_sum += e.item()
++        n_valid += n.item()
++        err_z0_sum += e_z0.item()
++        n_valid_z0 += n_z0.item()
++        loss_sum += loss.item() * bsz
++        kld_sum += kld.item() * bsz
++        mu_sum += mu.abs().mean().item() * bsz
++        n_samples += bsz
++
++    if was_training:
++        model.train()
++    return {
++        "loss": loss_sum / max(n_samples, 1),
++        "recon": err_sum / max(n_valid, 1),
++        "kld": kld_sum / max(n_samples, 1),
++        "recon_z0": err_z0_sum / max(n_valid_z0, 1),
++        "mu_abs_mean": mu_sum / max(n_samples, 1),
++    }
+ 
+ 
+ def fit(
+@@ -111,24 +159,27 @@ def fit(
+     checkpoint_dir: Path, num_epochs: int = 300, kl_weight: float = 10.0,
+     kl_warmup_epochs: int = 0, free_bits: float = 0.0, grad_clip_norm: float = 10.0,
+     checkpoint_every: int = 50, start_epoch: int = 0, history: dict | None = None,
++    scaler=None,
+ ) -> dict:
+     """Treina o modelo.
+ 
+     Roda `num_epochs` fixas, sempre — sem early stopping, igual ao ACT
+     oficial (train_bc em imitate_episodes.py roda `range(num_epochs)`
+-    inteiro, sem `patience` nem parada antecipada).
++    inteiro, sem parada antecipada).
+ 
+     `kl_warmup_epochs > 0` ativa annealing linear do kl_weight (0 ->
+     kl_weight, ao longo dessas épocas -- ver loss.kl_weight_schedule).
+     Técnica de fora do ACT/paper de referência, usada para incentivar o
+-    decoder a de fato USAR z (diferente do free_bits, que só evita o
+-    encoder colapsar mu/logvar -- são dois mecanismos distintos, ver
+-    diagnóstico em diagnose_latent_usage.py). Padrão (0) desliga, kl_weight
+-    fica fixo como sempre foi.
++    decoder a de fato USAR z. NOTA: com warmup ativo, val_loss deixa de ser
++    comparável entre épocas (o peso do KL muda) — a seleção por recon_z0
++    fica imune, mas não tire conclusões da curva de val_loss nesse regime.
++
++    `scaler`: passe o GradScaler de fora quando for restaurar o estado dele
++    de um checkpoint (resume); com None, um novo é criado aqui.
+ 
+-    Com `val_loader` (comportamento original): seleção do melhor checkpoint
+-    por `val_recon_z0` (ainda salva os top-3, mas nunca interrompe o treino
+-    por falta de melhora).
++    Com `val_loader` (comportamento original): seleção de checkpoints por
++    `val_recon_z0` num top-3 VERDADEIRO (entra quem for melhor que o pior
++    membro atual). Nunca interrompe o treino por falta de melhora.
+ 
+     Com `val_loader=None` (Fase 2, dataset pequeno demais pra val confiável):
+     treina com TODOS os dados por `num_epochs` fixo, salvando um checkpoint
+@@ -137,7 +188,8 @@ def fit(
+     """
+     checkpoint_dir = Path(checkpoint_dir)
+     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+-    scaler = torch.amp.GradScaler(enabled=(device.type == "cuda"))
++    if scaler is None:
++        scaler = torch.amp.GradScaler(enabled=(device.type == "cuda"))
+     has_val = val_loader is not None
+ 
+     if history is None:
+@@ -146,7 +198,11 @@ def fit(
+     # retomar de um checkpoint salvo por uma versão anterior deste arquivo,
+     # cujo history pode não ter todas as chaves de hoje (ex: mu_abs_mean).
+     best_metric = min(history.get("val_recon_z0", []), default=float("inf"))
+-    top_k_checkpoints: list = []
++    # Resume: bests já no disco voltam a participar do ranking e da poda.
++    top_k_checkpoints: list = scan_top_k(checkpoint_dir, metric_name="z0", k=TOP_K)
++    if top_k_checkpoints:
++        print(f"top-{TOP_K} reconstruído do disco: "
++              f"{[f'{v:.4f}' for v, _ in top_k_checkpoints]}")
+ 
+     for epoch in range(start_epoch, num_epochs):
+         current_kl_weight = kl_weight_schedule(epoch, kl_weight, kl_warmup_epochs)
+@@ -175,22 +231,33 @@ def fit(
+             )
+         print(log_line + f" | {time.time() - t0:.1f}s")
+ 
+-        save_checkpoint(checkpoint_dir / "last_checkpoint.pt", epoch, model, optimizer, history)
++        save_checkpoint(
++            checkpoint_dir / "last_checkpoint.pt", epoch, model, optimizer,
++            history, scaler=scaler,
++        )
+ 
+-        if has_val and va["recon_z0"] < best_metric:
+-            # Critério de seleção: val_recon_z0 (fidelidade à inferência).
+-            # Só seleciona/salva o melhor — nunca interrompe o treino.
+-            best_metric = va["recon_z0"]
+-            top_k_checkpoints = save_top_k_checkpoint(
+-                checkpoint_dir, epoch, va["recon_z0"], model, optimizer,
+-                history, top_k_checkpoints, k=3, metric_name="z0",
++        if has_val:
++            # Top-k VERDADEIRO: entra quem supera o pior membro atual (ou
++            # enquanto o ranking está incompleto), não só recordes globais.
++            enters_top_k = (
++                len(top_k_checkpoints) < TOP_K
++                or va["recon_z0"] < top_k_checkpoints[-1][0]
+             )
+-            print(f"  -> novo melhor val_recon_z0: {best_metric:.4f} | "
+-                  f"top-3: {[f'{v:.4f}' for v, _ in top_k_checkpoints]}")
++            if enters_top_k:
++                top_k_checkpoints = save_top_k_checkpoint(
++                    checkpoint_dir, epoch, va["recon_z0"], model,
++                    history, top_k_checkpoints, k=TOP_K, metric_name="z0",
++                )
++                is_best = va["recon_z0"] < best_metric
++                if is_best:
++                    best_metric = va["recon_z0"]
++                marker = "novo melhor" if is_best else "entra no top-k"
++                print(f"  -> {marker} val_recon_z0: {va['recon_z0']:.4f} | "
++                      f"top-{TOP_K}: {[f'{v:.4f}' for v, _ in top_k_checkpoints]}")
+ 
+         if (epoch + 1) % checkpoint_every == 0:
+             fname = checkpoint_dir / f"periodic_epoch{epoch:03d}.pt"
+-            save_checkpoint(fname, epoch, model, optimizer, history)
++            save_checkpoint(fname, epoch, model, optimizer, history, scaler=scaler)
+             print(f"  -> checkpoint periódico (época {epoch + 1})")
+ 
+-    return history
+\ No newline at end of file
++    return history
+diff --git a/src/act_lang/training/loss.py b/src/act_lang/training/loss.py
+index 01ba60c..ed68f76 100644
+--- a/src/act_lang/training/loss.py
++++ b/src/act_lang/training/loss.py
+@@ -14,6 +14,25 @@ def masked_l1(
+     return (abs_err * valid_mask).sum() / num_valid
+ 
+ 
++def masked_l1_sums(
++    pred: torch.Tensor, target: torch.Tensor, is_pad: torch.Tensor
++) -> tuple[torch.Tensor, torch.Tensor]:
++    """(soma de |erro| nos elementos válidos, nº de elementos válidos).
++
++    Para agregação CORRETA sobre um dataset inteiro: acumule as duas somas
++    entre batches e divida UMA vez no final. Média-de-médias por batch
++    (masked_l1 por batch / n_batches) enviesa quando o último batch é menor
++    (sem drop_last no val) e quando o nº de elementos válidos varia por
++    batch (padding diferente) — o viés é pequeno e quase constante entre
++    épocas (a SELEÇÃO de checkpoint sobrevive), mas o número reportado não
++    é a média verdadeira do dataset.
++    """
++    abs_err = F.l1_loss(pred, target, reduction="none")
++    valid_mask = (~is_pad).unsqueeze(-1)
++    num_valid = valid_mask.sum() * abs_err.shape[-1]
++    return (abs_err * valid_mask).sum(), num_valid
++
++
+ def kld_free_bits(
+     mu: torch.Tensor, logvar: torch.Tensor, free_bits: float = 0.0
+ ) -> torch.Tensor:
+diff --git a/src/act_lang/utils/runtime.py b/src/act_lang/utils/runtime.py
+index 239c159..d311f0c 100644
+--- a/src/act_lang/utils/runtime.py
++++ b/src/act_lang/utils/runtime.py
+@@ -7,11 +7,36 @@ precisa mudar entre os dois ambientes (montar Drive vs pasta local, device
+ """
+ 
+ import os
++import random
+ from pathlib import Path
+ 
+ import torch
+ 
+ 
++def set_seed(seed: int) -> None:
++    """Seed global: torch (CPU+CUDA), numpy e random.
++
++    Motivação (registro de método): o `seed` do config controlava SÓ o split
++    de episódios -- init de pesos, dropout, amostragem do z e shuffle do
++    DataLoader ficavam sem seed. Para comparar mecanismos de fusão, a
++    diferença entre eles precisa ser maior que a variância entre runs; sem
++    seed não dá nem pra estimar essa variância, nem pra garantir condições
++    iniciais comparáveis. Para a comparação final, rode 2-3 seeds por
++    mecanismo e reporte média ± desvio.
++
++    NÃO liga o modo determinístico do cuDNN (torch.use_deterministic_
++    algorithms): na T4 o custo de desempenho não compensa -- seed igual +
++    mesmo hardware já dá reprodutibilidade prática suficiente aqui.
++    """
++    random.seed(seed)
++    torch.manual_seed(seed)  # cobre CUDA também (torch >= 1.8)
++    try:
++        import numpy as np
++        np.random.seed(seed)
++    except ImportError:
++        pass
++
++
+ def is_colab() -> bool:
+     try:
+         import google.colab  # noqa: F401
+diff --git a/tests/test_fusion.py b/tests/test_fusion.py
+index eb7681c..0b9671f 100644
+--- a/tests/test_fusion.py
++++ b/tests/test_fusion.py
+@@ -26,7 +26,24 @@ def sem_download_de_verdade(monkeypatch):
+             vecs.append(torch.rand(DEFAULT_TEXT_EMBED_DIM, generator=g))
+         return torch.stack(vecs).to(device)
+ 
++    def fake_encode_tokens(self, texts, device):
++        # Comprimentos DIFERENTES por frase, de propósito: exercita o
++        # padding + key_padding_mask do caminho token-level (cross-attn).
++        seqs = []
++        for t in texts:
++            g = torch.Generator().manual_seed(hash(t) % (2**31))
++            length = 4 + (hash(t) % 3)  # 4..6 tokens
++            seqs.append(torch.rand(length, DEFAULT_TEXT_EMBED_DIM, generator=g))
++        l_max = max(s.size(0) for s in seqs)
++        tokens = torch.zeros(len(texts), l_max, DEFAULT_TEXT_EMBED_DIM)
++        mask = torch.ones(len(texts), l_max, dtype=torch.bool)
++        for i, s in enumerate(seqs):
++            tokens[i, : s.size(0)] = s
++            mask[i, : s.size(0)] = False
++        return tokens.to(device), mask.to(device)
++
+     monkeypatch.setattr(TextEmbeddingCache, "encode", fake_encode)
++    monkeypatch.setattr(TextEmbeddingCache, "encode_tokens", fake_encode_tokens)
+ 
+ 
+ TASK_TEXTS = [
+@@ -122,6 +139,52 @@ class TestCrossAttentionFusion:
+         assert fusion.proj.weight.grad.abs().sum() > 0
+         assert fusion.cross_attn.out_proj.weight.grad is not None
+ 
++    def test_nao_degenerada_attended_varia_entre_tokens(self):
++        """Regressão da degenerescência de key única: com a instrução como
++        SEQUÊNCIA de tokens (L>1 keys), o attended de queries diferentes
++        DEVE ser diferente. Na versão antiga (1 key pooled), softmax de 1
++        logito = 1.0 sempre -> attended idêntico pra todos os tokens de
++        observação, e este teste falharia."""
++        from act_lang.models.fusion.cross_attn import CrossAttentionFusion
++
++        torch.manual_seed(0)
++        fusion = CrossAttentionFusion(d_model=16, n_heads=2)
++        fusion.eval()  # sem dropout: diferença observada vem SÓ da atenção
++        obs_tokens = torch.randn(1, 6, 16)  # 6 queries com conteúdos distintos
++        lang = fusion.encode_text(TASK_TEXTS[:1], torch.device("cpu"))
++        with torch.no_grad():
++            attended = fusion.attend(obs_tokens, lang)
++
++        # Se todas as linhas fossem iguais (degenerado), o desvio entre
++        # posições seria ~0. Exige variação genuína entre queries.
++        var_entre_posicoes = attended.std(dim=1).mean().item()
++        assert var_entre_posicoes > 1e-6, (
++            "attended idêntico entre tokens de observação -- cross-attention "
++            "degenerou em deslocamento uniforme (key única?)"
++        )
++
++    def test_padding_da_linguagem_nao_afeta_resultado(self):
++        """As posições de padding da instrução (mask=True) não podem
++        contribuir: trocar o CONTEÚDO do padding não deve mudar nada."""
++        from act_lang.models.fusion.cross_attn import CrossAttentionFusion
++
++        torch.manual_seed(0)
++        fusion = CrossAttentionFusion(d_model=16, n_heads=2)
++        fusion.eval()
++        obs_tokens = torch.randn(1, 4, 16)
++        lang_tokens, mask = fusion.encode_text(TASK_TEXTS[:1], torch.device("cpu"))
++        # injeta padding artificial: 2 posições extras mascaradas com lixo
++        lixo = torch.randn(1, 2, lang_tokens.size(-1))
++        lang_a = (torch.cat([lang_tokens, lixo], dim=1),
++                  torch.cat([mask, torch.ones(1, 2, dtype=torch.bool)], dim=1))
++        lang_b = (torch.cat([lang_tokens, lixo * 100.0], dim=1),
++                  torch.cat([mask, torch.ones(1, 2, dtype=torch.bool)], dim=1))
++        with torch.no_grad():
++            out_a = fusion.fuse(obs_tokens, lang_a)
++            out_b = fusion.fuse(obs_tokens, lang_b)
++
++        assert torch.allclose(out_a, out_b, atol=1e-6)
++
+ 
+ class TestFusionIntegrationComACT:
+     """Cada mecanismo plugado de verdade no ACT -- forward, backward, e a
