@@ -5,6 +5,17 @@ Motivação (diagnóstico de set/2026): época de horas no Colab/T4 com GPU
 ociosa -- o custo era decodificar vídeo por amostra, a cada época. Depois
 deste script, o treino lê JPEGs prontos e o gargalo volta a ser a GPU.
 
+CORREÇÃO (01/09): antes deste patch, o loop instanciava um LeRobotDataset
+NOVO por episódio (1693x) sem `root=` explícito -- cada instância parte de
+um diretório "espelho" vazio (~/.cache/huggingface/lerobot/{repo}), então
+`_load_metadata()`/`reader.try_load()` FALHAM sempre, mesmo com tudo já
+baixado, disparando get_safe_version() + snapshot_download() -- CHAMADAS DE
+API -- em TODA iteração. Com anônimo (~500 req/300s), estoura por volta do
+episódio 20. Corrigido baixando o dataset UMA VEZ com snapshot_download e
+passando `root=` explícito a toda instância: o load passa a ser 100% local,
+sem nenhuma chamada de rede depois do download inicial (a doc do
+LeRobotDataset confirma: "root... This can happen while you're offline").
+
 Uso (uma vez por conjunto de tarefas; o das 40 serve também aos de 10,
 porque o filtro por task acontece de novo na hora de treinar):
 
@@ -15,9 +26,11 @@ porque o filtro por task acontece de novo na hora de treinar):
     python scripts/train.py --config language_40_film \\
         --preprocessed-dir data/preprocessed_libero40
 
-Espaço em disco: ~20-40GB para as 40 tarefas (JPEG q92). É retomável: cada
-episódio ganha um marcador .done; re-rodar pula os já concluídos (sessão
-caiu no meio -> rode de novo, ele continua).
+Espaço em disco: ~20-40GB para as 40 tarefas (JPEG q92), MAIS ~10-20GB do
+dataset bruto em --data-root (padrão: data/libero_raw/ -- baixado uma vez,
+reaproveitado por qualquer --config depois). É retomável: cada episódio
+ganha um marcador .done; re-rodar pula os já concluídos (sessão caiu no
+meio -> rode de novo, ele continua).
 
 Nota de fidelidade: JPEG é lossy (como o próprio vídeo de origem já é);
 q92 é visualmente indistinguível e é prática padrão. Para bit-exatidão,
@@ -28,6 +41,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+
+from huggingface_hub import snapshot_download
 
 import numpy as np
 import torch
@@ -77,14 +92,29 @@ def main() -> None:
     parser.add_argument("--format", choices=("jpg", "png"), default="jpg")
     parser.add_argument("--quality", type=int, default=92,
                         help="Qualidade JPEG (ignorado com --format png).")
+    parser.add_argument("--data-root", type=Path, default=Path("data/libero_raw"),
+                        help="Onde baixar/ler o dataset lerobot/libero completo "
+                             "(uma vez; reaproveitado em runs futuros e por "
+                             "qualquer --config). Separado de --out, que é onde "
+                             "vão os FRAMES pré-processados.")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     out: Path = args.out
     (out / FRAMES_DIR).mkdir(parents=True, exist_ok=True)
 
-    meta_lr = LeRobotDatasetMetadata(REPO_ID)
-    full_dataset = LeRobotDataset(REPO_ID)
+    # Download ÚNICO do dataset inteiro (meta + data + vídeos). Só faz
+    # trabalho de rede pros arquivos que ainda não estão em --data-root;
+    # re-rodar (mesmo config, ou outro --config sobre o mesmo --data-root)
+    # não baixa nada de novo. É esta chamada, sozinha, que substitui as
+    # 1693 chamadas de API que o loop antigo fazia.
+    print(f"baixando/verificando lerobot/{REPO_ID.split('/')[-1]} em {args.data_root} "
+          "(pula o que já estiver completo)...")
+    args.data_root.mkdir(parents=True, exist_ok=True)
+    snapshot_download(REPO_ID, repo_type="dataset", local_dir=args.data_root)
+
+    meta_lr = LeRobotDatasetMetadata(REPO_ID, root=args.data_root)
+    full_dataset = LeRobotDataset(REPO_ID, root=args.data_root)
     episode_ids = filter_episodes_by_tasks(meta_lr, full_dataset, cfg["task_texts"])
     labels = get_episode_task_labels(meta_lr, full_dataset, episode_ids)
     print(f"{len(episode_ids)} episódios a pré-processar -> {out}")
@@ -107,7 +137,10 @@ def main() -> None:
             continue
 
         ep_dir.mkdir(parents=True, exist_ok=True)
-        ds = LeRobotDataset(REPO_ID, episodes=[ep])  # sem delta_ts: 1 item = 1 frame
+        # root= explícito: lê 100% do disco local já baixado, ZERO chamadas
+        # de rede (sem isto, cada instância parte de um diretório "espelho"
+        # vazio e recorre à API do Hub em toda iteração -- ver docstring).
+        ds = LeRobotDataset(REPO_ID, root=args.data_root, episodes=[ep])  # sem delta_ts: 1 item = 1 frame
         states, actions = [], []
         for t in range(len(ds)):
             item = ds[t]
