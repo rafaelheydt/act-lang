@@ -62,7 +62,7 @@ def make_config(fusion_type: str) -> dict:
     assert fusion_type in ("token", "film", "cross_attn"), fusion_type
     return {
         "experiment_name": f"libero_v2_40tasks_lingua_{fusion_type}",
-        "device_index": None,  # None = auto (GPU com mais memória livre)
+        "device_index": 1,  # 1 = RTX 3050 no seu nvidia-smi; 0 = A2000
         # dados
         "task_texts": TASK_TEXTS_LIBERO_40,
         "task_suite_name": "libero_40_mixed",  # não é suite oficial pura -- ver docstring
@@ -72,7 +72,9 @@ def make_config(fusion_type: str) -> dict:
         "seed": 42,
         "obs_horizon": 1,
         "pred_horizon": 50,
-        "batch_size": 32,
+        "batch_size": 8,     # era 32; físico na 3050 com VRAM dividida
+        "accum_steps": 4,     # 16 x 2 = efetivo 32, idêntico ao Colab
+        "num_workers": 2,  #  no Colab; 4 na 3050
         # modelo -- idêntico à versão de 10 tarefas (mesma arquitetura,
         # só muda a quantidade de dado)
         "action_dim": 7,

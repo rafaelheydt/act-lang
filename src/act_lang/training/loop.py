@@ -71,14 +71,38 @@ TOP_K = 3
 def train_one_epoch(
     model, loader, bridge: Bridge, optimizer, scaler, device,
     kl_weight: float, free_bits: float, grad_clip_norm: float = 10.0,
+    accum_steps: int = 1,
 ) -> dict:
+    """`accum_steps > 1` ativa gradient accumulation: o step do optimizer
+    acontece a cada accum_steps microbatches, com a loss dividida por
+    accum_steps -- batch EFETIVO = batch_size x accum_steps. Motivação:
+    manter o batch efetivo 32 da T4/Colab ao treinar em GPUs com menos
+    VRAM (RTX 3050 8GB: batch 16 x accum 2; A2000 6GB: batch 8 x accum 4),
+    senão o regime de treino vira um confundidor na comparação entre
+    mecanismos de fusão. Sobra de microbatches no fim da época (época não
+    múltipla de accum_steps) é aplicada num step final com o que houver.
+    RESSALVA: a equivalência exata com o batch grande exige BatchNorm
+    congelada (batch stats acoplam as amostras do microbatch) -- vale aqui
+    porque todos os configs usam freeze_bn=True; se um dia freeze_bn sair,
+    accumulation deixa de ser matematicamente idêntica (aproximação usual).
+    As métricas logadas são as losses CHEIAS por microbatch (sem a divisão),
+    comparáveis às de accum_steps=1."""
     model.train()
     sums = {"loss": 0.0, "recon": 0.0, "kld": 0.0, "mu_abs_mean": 0.0}
     n_batches = 0
-    for batch in loader:
+
+    def _apply_step():
+        scaler.unscale_(optimizer)  # unscale ANTES do clip — padrão AMP correto
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad()
+
+    optimizer.zero_grad()
+    pending = False
+    for i, batch in enumerate(loader):
         images, state, actions, is_pad, task_texts = bridge(batch, device)
 
-        optimizer.zero_grad()
         with torch.amp.autocast(device_type=device.type, enabled=(device.type == "cuda")):
             pred_actions, mu, logvar = model(
                 images, state, actions=actions, is_pad=is_pad, task_texts=task_texts
@@ -87,17 +111,19 @@ def train_one_epoch(
                 pred_actions, actions, mu, logvar, is_pad, kl_weight, free_bits
             )
 
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)  # unscale ANTES do clip — padrão AMP correto
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
-        scaler.step(optimizer)
-        scaler.update()
+        scaler.scale(loss / accum_steps).backward()
+        pending = True
+        if (i + 1) % accum_steps == 0:
+            _apply_step()
+            pending = False
 
         sums["loss"] += loss.item()
         sums["recon"] += recon.item()
         sums["kld"] += kld.item()
         sums["mu_abs_mean"] += mu.detach().abs().mean().item()
         n_batches += 1
+    if pending:  # microbatches restantes de época não múltipla de accum_steps
+        _apply_step()
     return {k: v / n_batches for k, v in sums.items()}
 
 
@@ -159,7 +185,7 @@ def fit(
     checkpoint_dir: Path, num_epochs: int = 300, kl_weight: float = 10.0,
     kl_warmup_epochs: int = 0, free_bits: float = 0.0, grad_clip_norm: float = 10.0,
     checkpoint_every: int = 50, start_epoch: int = 0, history: dict | None = None,
-    scaler=None,
+    scaler=None, accum_steps: int = 1,
 ) -> dict:
     """Treina o modelo.
 
@@ -209,7 +235,7 @@ def fit(
         t0 = time.time()
         tr = train_one_epoch(
             model, train_loader, bridge, optimizer, scaler, device,
-            current_kl_weight, free_bits, grad_clip_norm,
+            current_kl_weight, free_bits, grad_clip_norm, accum_steps=accum_steps,
         )
         for k, v in tr.items():
             history.setdefault(f"train_{k}", []).append(v)

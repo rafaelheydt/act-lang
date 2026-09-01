@@ -23,3 +23,8 @@ dist/
 # versão. Isso já aconteceu uma vez neste projeto.)
 /data/
 ~/.cache/huggingface/
+.vscode/
+logs/
+*.log
+*.log~
+data/preprocessed_*/

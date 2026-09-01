@@ -41,7 +41,11 @@ from act_lang.models.fusion import build_fusion
 from act_lang.training.checkpoints import load_checkpoint
 from act_lang.training.loop import fit
 from act_lang.training.optim import build_optimizer
-from act_lang.utils.runtime import describe_devices, get_checkpoint_dir, pick_device, set_seed
+from act_lang.data.preprocessed import PreprocessedLiberoDataset, build_normalizers_from_meta
+from act_lang.utils.runtime import (
+    describe_devices, enable_fast_matmul, get_checkpoint_dir, is_colab,
+    pick_device, set_seed,
+)
 
 # nome CLI -> (módulo em configs/, atributo do dict CONFIG dentro dele)
 CONFIG_REGISTRY = {
@@ -60,6 +64,63 @@ def load_config(name: str) -> dict:
     module_path, attr = CONFIG_REGISTRY[name]
     module = importlib.import_module(module_path)
     return getattr(module, attr)
+
+
+def _loader_kwargs(cfg: dict, device: torch.device) -> dict:
+    """Knobs de DataLoader por ambiente. No Colab, workers com decode de
+    vídeo travam (fork+ffmpeg) -> 0. Fora dele, workers de verdade: com os
+    frames pré-processados, 8 workers numa CPU de 16 núcleos saturam a GPU;
+    override explícito via cfg["num_workers"] se precisar."""
+    if "num_workers" in cfg:
+        nw = cfg["num_workers"]
+    elif is_colab():
+        nw = 0
+    else:
+        nw = min(8, os.cpu_count() or 1)
+    kwargs = dict(num_workers=nw, pin_memory=(device.type == "cuda"))
+    if nw > 0:
+        kwargs.update(persistent_workers=True, prefetch_factor=4)
+    return kwargs
+
+
+def build_data_preprocessed(cfg: dict, device: torch.device, root):
+    """Caminho RÁPIDO: frames pré-processados em disco (ver
+    scripts/preprocess_dataset.py e data/preprocessed.py). Mesmos splits,
+    mesma normalização (stats globais copiados do lerobot), mesmo bridge --
+    só a origem dos bytes muda."""
+    probe = PreprocessedLiberoDataset(root, cfg["pred_horizon"], cfg["task_texts"])
+    labels = probe.episode_task_labels
+    episode_ids = sorted(labels)
+
+    val_strategy = cfg.get("val_strategy", "fraction")
+    if val_strategy == "min_holdout":
+        train_ids, val_ids = split_episodes_min_holdout(
+            episode_ids, labels, cfg.get("n_val_per_task", 1), cfg["seed"]
+        )
+    else:
+        train_ids, val_ids = split_episodes_stratified(
+            episode_ids, labels, cfg["val_frac"], cfg["seed"]
+        )
+    print(f"[pré-processado: {root}] episódios: {len(episode_ids)} -> "
+          f"train {len(train_ids)} | val {len(val_ids)} (val_strategy={val_strategy!r})")
+
+    train_dataset = PreprocessedLiberoDataset(
+        root, cfg["pred_horizon"], cfg["task_texts"], episodes=train_ids
+    )
+    val_dataset = PreprocessedLiberoDataset(
+        root, cfg["pred_horizon"], cfg["task_texts"], episodes=val_ids
+    )
+    kwargs = _loader_kwargs(cfg, device)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=cfg["batch_size"], shuffle=True,
+        drop_last=True, **kwargs,
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=cfg["batch_size"], shuffle=False, **kwargs,
+    )
+    state_norm, action_norm = build_normalizers_from_meta(train_dataset.meta, device)
+    bridge = LiberoActBridge(state_norm, action_norm)
+    return train_loader, val_loader, bridge
 
 
 def build_data(cfg: dict, device: torch.device):
@@ -85,16 +146,13 @@ def build_data(cfg: dict, device: torch.device):
     train_dataset = LeRobotDataset(REPO_ID, episodes=train_ids, delta_timestamps=delta_ts)
     val_dataset = LeRobotDataset(REPO_ID, episodes=val_ids, delta_timestamps=delta_ts)
 
-    # num_workers=0 é DELIBERADO no Colab: workers com decodificação de
-    # vídeo (fork + ffmpeg do lerobot) travam/vazam no runtime deles. Fora
-    # do Colab, subir para 2-4 workers tende a destravar a GPU (os frames
-    # vêm de vídeo; com 0, a T4 espera a CPU decodificar amostra a amostra).
+    kwargs = _loader_kwargs(cfg, device)  # 0 workers no Colab; 8 fora dele
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=cfg["batch_size"], shuffle=True,
-        num_workers=0, drop_last=True,
+        drop_last=True, **kwargs,
     )
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=cfg["batch_size"], shuffle=False, num_workers=0,
+        val_dataset, batch_size=cfg["batch_size"], shuffle=False, **kwargs,
     )
 
     state_norm = MinMaxNormalizer.from_lerobot_stats(meta.stats, "observation.state").to(device)
@@ -130,6 +188,10 @@ def main() -> None:
     parser.add_argument("--config", required=True, choices=sorted(CONFIG_REGISTRY))
     parser.add_argument("--resume", action="store_true",
                          help="Retoma de checkpoint_dir/last_checkpoint.pt, se existir.")
+    parser.add_argument("--preprocessed-dir", type=Path, default=None,
+                         help="Pasta gerada por scripts/preprocess_dataset.py; "
+                              "se passada, treina lendo frames prontos do disco "
+                              "(ordens de magnitude mais rápido que decodificar vídeo).")
     parser.add_argument("--checkpoint-dir", default=None,
                          help="Sobrescreve o diretório de checkpoints (padrão: get_checkpoint_dir).")
     args = parser.parse_args()
@@ -142,8 +204,14 @@ def main() -> None:
     print(f"usando: {device}")
 
     set_seed(cfg["seed"])  # pesos, dropout, z, shuffle -- não só o split
+    enable_fast_matmul()   # TF32 (Ampere+) + cudnn.benchmark; no-op na T4
 
-    train_loader, val_loader, bridge = build_data(cfg, device)
+    if args.preprocessed_dir is not None:
+        train_loader, val_loader, bridge = build_data_preprocessed(
+            cfg, device, args.preprocessed_dir
+        )
+    else:
+        train_loader, val_loader, bridge = build_data(cfg, device)
     model, optimizer = build_model_and_optimizer(cfg, device)
 
     checkpoint_dir = Path(args.checkpoint_dir) if args.checkpoint_dir else get_checkpoint_dir(cfg["experiment_name"])
@@ -171,6 +239,7 @@ def main() -> None:
         free_bits=cfg["free_bits"],
         grad_clip_norm=cfg["grad_clip_norm"], checkpoint_every=cfg["checkpoint_every"],
         start_epoch=start_epoch, history=history, scaler=scaler,
+        accum_steps=cfg.get("accum_steps", 1),  # batch efetivo = batch_size x accum
     )
 
 

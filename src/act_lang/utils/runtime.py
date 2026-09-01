@@ -37,6 +37,21 @@ def set_seed(seed: int) -> None:
         pass
 
 
+def enable_fast_matmul() -> None:
+    """Otimizações de matmul sem custo de precisão relevante para BC:
+
+    - TF32 (Ampere+: RTX 30xx/A2000 em diante): matmuls fp32 ~2x mais
+      rápidos com mantissa de 10 bits; em GPUs sem suporte (T4/Turing) as
+      flags são ignoradas -- seguro chamar sempre.
+    - cudnn.benchmark: shapes de entrada são FIXOS neste treino (mesma
+      resolução, mesmo batch), então o autotuner do cuDNN escolhe o kernel
+      mais rápido uma vez e reutiliza.
+    Chamar uma vez, antes de criar o modelo."""
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
+
+
 def is_colab() -> bool:
     try:
         import google.colab  # noqa: F401
