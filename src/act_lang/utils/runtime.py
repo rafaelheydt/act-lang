@@ -74,10 +74,25 @@ def pick_device(preferred_index: int | None = None) -> torch.device:
     if not torch.cuda.is_available():
         return torch.device("cpu")
 
+    n_gpus = torch.cuda.device_count()
+
     if preferred_index is not None:
+        # CORREÇÃO (set/2026): antes, um índice inválido (ex.: cuda:1 numa
+        # máquina com só 1 GPU -- exatamente o caso do config da CEPEDI
+        # rodado sem ajuste no Colab) virava um torch.device silenciosamente
+        # "válido" -- construir o objeto não toca a GPU, então o erro real
+        # só aparecia bem mais tarde, na primeira operação CUDA, com uma
+        # mensagem confusa e distante da causa. Falha aqui, na hora da
+        # escolha, com uma mensagem que aponta o problema real.
+        if preferred_index >= n_gpus:
+            raise ValueError(
+                f"device_index={preferred_index} não existe -- esta máquina só tem "
+                f"{n_gpus} GPU(s) (índices válidos: 0..{n_gpus - 1}). Se o config foi "
+                "escrito para outra máquina (ex.: device_index fixo da CEPEDI rodando "
+                "no Colab), use device_index=None para escolha automática."
+            )
         return torch.device(f"cuda:{preferred_index}")
 
-    n_gpus = torch.cuda.device_count()
     if n_gpus == 1:
         return torch.device("cuda:0")
 

@@ -96,3 +96,43 @@ class TestGetCheckpointDir:
         assert calls == []
         assert result == tmp_path / "meu_experimento"
         assert result.is_dir()
+
+
+class TestPickDevice:
+    """Regressão: um device_index fora do range das GPUs existentes (ex.:
+    config escrito para uma máquina com 2 GPUs, rodado numa com 1 -- caso
+    real: device_index=1 da CEPEDI, esquecido, rodando no Colab com só a
+    T4) precisa falhar NA ESCOLHA do device, não silenciosamente construir
+    um torch.device "válido" que só quebra bem mais tarde, na primeira
+    operação CUDA, com uma mensagem sem relação óbvia com a causa."""
+
+    def test_indice_fora_do_range_falha_na_escolha(self, monkeypatch):
+        import torch
+        from act_lang.utils import runtime
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)  # só cuda:0
+
+        with pytest.raises(ValueError, match="device_index=1.*só tem 1 GPU"):
+            runtime.pick_device(preferred_index=1)
+
+    def test_indice_dentro_do_range_funciona(self, monkeypatch):
+        import torch
+        from act_lang.utils import runtime
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+
+        assert runtime.pick_device(preferred_index=1) == torch.device("cuda:1")
+
+    def test_sem_indice_escolhe_gpu_com_mais_memoria_livre(self, monkeypatch):
+        import torch
+        from act_lang.utils import runtime
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+        # cuda:0 quase cheia, cuda:1 livre -- comportamento preservado
+        mem = {0: (1_000_000, 16_000_000_000), 1: (15_000_000_000, 16_000_000_000)}
+        monkeypatch.setattr(torch.cuda, "mem_get_info", lambda i: mem[i])
+
+        assert runtime.pick_device(preferred_index=None) == torch.device("cuda:1")
