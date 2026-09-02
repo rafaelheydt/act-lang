@@ -107,11 +107,26 @@ def describe_devices() -> str:
 def get_checkpoint_dir(experiment_name: str, local_base: str | Path | None = None) -> Path:
     """Colab: monta o Drive e devolve MyDrive/<experiment_name>.
     Local: usa `local_base` (ou $ACT_LANG_CHECKPOINT_DIR, ou ~/act-lang-checkpoints).
+
+    CORREÇÃO (set/2026): `drive.mount()` só funciona dentro do kernel
+    IPython vivo da célula (ele fala com o frontend via mensagem, pedindo
+    autorização) -- chamado de um SUBPROCESSO (ex.: notebook que roda
+    `scripts/train.py` via subprocess.Popen, em vez de reimplementar o
+    treino inline) ele falha com AttributeError: 'NoneType' object has no
+    attribute 'kernel', porque não há kernel nenhum naquele processo.
+    Como o Drive é um mountpoint de verdade no nível do SO (compartilhado
+    por qualquer processo, não só o que montou), a correção é checar se
+    `/content/drive/MyDrive` já existe ANTES de tentar montar -- se a
+    própria célula do notebook já montou o Drive, pulamos a chamada por
+    completo. Só tenta montar (e só então precisa do kernel) quando de
+    fato ainda não está montado.
     """
     if is_colab():
-        from google.colab import drive
-        drive.mount("/content/drive", force_remount=False)
-        checkpoint_dir = Path("/content/drive/MyDrive") / experiment_name
+        drive_root = Path("/content/drive/MyDrive")
+        if not drive_root.is_dir():
+            from google.colab import drive
+            drive.mount("/content/drive", force_remount=False)
+        checkpoint_dir = drive_root / experiment_name
     else:
         base = local_base or os.environ.get("ACT_LANG_CHECKPOINT_DIR") or (Path.home() / "act-lang-checkpoints")
         checkpoint_dir = Path(base) / experiment_name
