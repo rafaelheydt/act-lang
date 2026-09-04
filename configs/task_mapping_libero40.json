@@ -1,0 +1,215 @@
+{
+  "_comment": "Mapeamento das 40 task_texts de configs/libero_40tasks_language.py (TASK_TEXTS_LIBERO_40) para os arquivos HDF5 oficiais do LIBERO (yifengzhu-hf/LIBERO-datasets no HF Hub). Gerado para o plano de migracao JPEG->HDF5 (ver docs/hdf5_migration.md). base_url + suite + file = URL completa de download.",
+  "_base_url": "https://huggingface.co/datasets/yifengzhu-hf/LIBERO-datasets/resolve/main/{suite}/{file}",
+  "_suite_distribution": {
+    "libero_object": 10,
+    "libero_spatial": 10,
+    "libero_goal": 10,
+    "libero_10": 10,
+    "libero_90": 0
+  },
+  "tasks": {
+    "open the middle drawer of the cabinet": {
+      "suite": "libero_goal",
+      "file": "open_the_middle_drawer_of_the_cabinet_demo.hdf5",
+      "match": "exact"
+    },
+    "open the top drawer and put the bowl inside": {
+      "suite": "libero_goal",
+      "file": "open_the_top_drawer_and_put_the_bowl_inside_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the alphabet soup and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_alphabet_soup_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the bbq sauce and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_bbq_sauce_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl between the plate and the ramekin and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_between_the_plate_and_the_ramekin_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl from table center and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_from_table_center_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_in_the_top_drawer_of_the_wooden_cabinet_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl next to the cookie box and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_next_to_the_cookie_box_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl next to the plate and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_next_to_the_plate_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl next to the ramekin and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_next_to_the_ramekin_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl on the cookie box and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_on_the_cookie_box_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl on the ramekin and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_on_the_ramekin_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl on the stove and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_on_the_stove_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the black bowl on the wooden cabinet and place it on the plate": {
+      "suite": "libero_spatial",
+      "file": "pick_up_the_black_bowl_on_the_wooden_cabinet_and_place_it_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the book and place it in the back compartment of the caddy": {
+      "suite": "libero_10",
+      "file": "STUDY_SCENE1_pick_up_the_book_and_place_it_in_the_back_compartment_of_the_caddy_demo.hdf5",
+      "match": "resolved_by_clustering",
+      "note": "Mesmo texto existe em libero_10/STUDY_SCENE1 (50 demos) e libero_90/STUDY_SCENE2 (50 demos, cena diferente) -- contagem de demos nao desambigua. Resolvido por clustering: as 40 tarefas do config atual batem exatamente com libero_object(10)+libero_spatial(10)+libero_goal(10)+libero_10(10) completos, libero_90 nao contribui NENHUMA tarefa; as outras 9 tarefas de libero_10 ja batem exato, esta fecha o conjunto de 10."
+    },
+    "pick up the butter and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_butter_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the chocolate pudding and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_chocolate_pudding_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the cream cheese and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_cream_cheese_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the ketchup and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_ketchup_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the milk and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_milk_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the orange juice and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_orange_juice_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the salad dressing and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_salad_dressing_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "pick up the tomato sauce and place it in the basket": {
+      "suite": "libero_object",
+      "file": "pick_up_the_tomato_sauce_and_place_it_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "push the plate to the front of the stove": {
+      "suite": "libero_goal",
+      "file": "push_the_plate_to_the_front_of_the_stove_demo.hdf5",
+      "match": "exact"
+    },
+    "put both moka pots on the stove": {
+      "suite": "libero_10",
+      "file": "KITCHEN_SCENE8_put_both_moka_pots_on_the_stove_demo.hdf5",
+      "match": "exact"
+    },
+    "put both the alphabet soup and the cream cheese box in the basket": {
+      "suite": "libero_10",
+      "file": "LIVING_ROOM_SCENE1_put_both_the_alphabet_soup_and_the_cream_cheese_box_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "put both the alphabet soup and the tomato sauce in the basket": {
+      "suite": "libero_10",
+      "file": "LIVING_ROOM_SCENE2_put_both_the_alphabet_soup_and_the_tomato_sauce_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "put both the cream cheese box and the butter in the basket": {
+      "suite": "libero_10",
+      "file": "LIVING_ROOM_SCENE2_put_both_the_cream_cheese_box_and_the_butter_in_the_basket_demo.hdf5",
+      "match": "exact"
+    },
+    "put the black bowl in the bottom drawer of the cabinet and close it": {
+      "suite": "libero_10",
+      "file": "KITCHEN_SCENE4_put_the_black_bowl_in_the_bottom_drawer_of_the_cabinet_and_close_it_demo.hdf5",
+      "match": "exact"
+    },
+    "put the bowl on the plate": {
+      "suite": "libero_goal",
+      "file": "put_the_bowl_on_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "put the bowl on the stove": {
+      "suite": "libero_goal",
+      "file": "put_the_bowl_on_the_stove_demo.hdf5",
+      "match": "exact"
+    },
+    "put the bowl on top of the cabinet": {
+      "suite": "libero_goal",
+      "file": "put_the_bowl_on_top_of_the_cabinet_demo.hdf5",
+      "match": "exact"
+    },
+    "put the cream cheese in the bowl": {
+      "suite": "libero_goal",
+      "file": "put_the_cream_cheese_in_the_bowl_demo.hdf5",
+      "match": "exact"
+    },
+    "put the white mug on the left plate and put the yellow and white mug on the right plate": {
+      "suite": "libero_10",
+      "file": "LIVING_ROOM_SCENE5_put_the_white_mug_on_the_left_plate_and_put_the_yellow_and_white_mug_on_the_right_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "put the white mug on the plate and put the chocolate pudding to the right of the plate": {
+      "suite": "libero_10",
+      "file": "LIVING_ROOM_SCENE6_put_the_white_mug_on_the_plate_and_put_the_chocolate_pudding_to_the_right_of_the_plate_demo.hdf5",
+      "match": "exact"
+    },
+    "put the wine bottle on the rack": {
+      "suite": "libero_goal",
+      "file": "put_the_wine_bottle_on_the_rack_demo.hdf5",
+      "match": "exact"
+    },
+    "put the wine bottle on top of the cabinet": {
+      "suite": "libero_goal",
+      "file": "put_the_wine_bottle_on_top_of_the_cabinet_demo.hdf5",
+      "match": "exact"
+    },
+    "put the yellow and white mug in the microwave and close it": {
+      "suite": "libero_10",
+      "file": "KITCHEN_SCENE6_put_the_yellow_and_white_mug_in_the_microwave_and_close_it_demo.hdf5",
+      "match": "exact"
+    },
+    "turn on the stove": {
+      "suite": "libero_goal",
+      "file": "turn_on_the_stove_demo.hdf5",
+      "match": "resolved_by_clustering",
+      "note": "Mesmo texto existe em libero_goal (50 demos), libero_90/KITCHEN_SCENE3 e libero_90/KITCHEN_SCENE9. Resolvido por clustering: as outras 9 tarefas de libero_goal ja batem exato, esta fecha o conjunto de 10; libero_90 nao contribui nenhuma tarefa nas outras 38."
+    },
+    "turn on the stove and put the moka pot on it": {
+      "suite": "libero_10",
+      "file": "KITCHEN_SCENE3_turn_on_the_stove_and_put_the_moka_pot_on_it_demo.hdf5",
+      "match": "exact"
+    }
+  }
+}

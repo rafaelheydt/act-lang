@@ -42,6 +42,10 @@ from act_lang.training.checkpoints import load_checkpoint
 from act_lang.training.loop import fit
 from act_lang.training.optim import build_optimizer
 from act_lang.data.preprocessed import PreprocessedLiberoDataset, build_normalizers_from_meta
+from act_lang.data.hdf5_libero import (
+    HDF5LiberoDataset, load_meta as load_meta_hdf5,
+    build_normalizers_from_meta as build_normalizers_from_meta_hdf5,
+)
 from act_lang.utils.runtime import (
     describe_devices, enable_fast_matmul, get_checkpoint_dir, is_colab,
     pick_device, set_seed,
@@ -123,6 +127,48 @@ def build_data_preprocessed(cfg: dict, device: torch.device, root):
     return train_loader, val_loader, bridge
 
 
+def build_data_hdf5(cfg: dict, device: torch.device, root):
+    """Caminho HDF5 nativo: arrays uint8 crus do LIBERO oficial, sem
+    decodificação de imagem nenhuma (nem vídeo, nem JPEG) -- ver
+    docs/hdf5_migration.md pro raciocínio completo e scripts/download_libero_hdf5.py
+    pra baixar `root`. Mesmos splits, mesmo bridge; resolução nativa 128x128
+    (decisão tomada com o usuário -- ver docs/hdf5_migration.md)."""
+    probe = HDF5LiberoDataset(root, cfg["pred_horizon"], cfg["task_texts"])
+    labels = probe.episode_task_labels
+    episode_ids = sorted(labels)
+
+    val_strategy = cfg.get("val_strategy", "fraction")
+    if val_strategy == "min_holdout":
+        train_ids, val_ids = split_episodes_min_holdout(
+            episode_ids, labels, cfg.get("n_val_per_task", 1), cfg["seed"]
+        )
+    else:
+        train_ids, val_ids = split_episodes_stratified(
+            episode_ids, labels, cfg["val_frac"], cfg["seed"]
+        )
+    print(f"[hdf5: {root}] episódios: {len(episode_ids)} -> "
+          f"train {len(train_ids)} | val {len(val_ids)} (val_strategy={val_strategy!r})")
+
+    train_dataset = HDF5LiberoDataset(
+        root, cfg["pred_horizon"], cfg["task_texts"], episodes=train_ids
+    )
+    val_dataset = HDF5LiberoDataset(
+        root, cfg["pred_horizon"], cfg["task_texts"], episodes=val_ids
+    )
+    kwargs = _loader_kwargs(cfg, device)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=cfg["batch_size"], shuffle=True,
+        drop_last=True, **kwargs,
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=cfg["batch_size"], shuffle=False, **kwargs,
+    )
+    meta = load_meta_hdf5(root)
+    state_norm, action_norm = build_normalizers_from_meta_hdf5(meta, device)
+    bridge = LiberoActBridge(state_norm, action_norm)
+    return train_loader, val_loader, bridge
+
+
 def build_data(cfg: dict, device: torch.device):
     meta = LeRobotDatasetMetadata(REPO_ID)
     full_dataset = LeRobotDataset(REPO_ID)
@@ -192,6 +238,12 @@ def main() -> None:
                          help="Pasta gerada por scripts/preprocess_dataset.py; "
                               "se passada, treina lendo frames prontos do disco "
                               "(ordens de magnitude mais rápido que decodificar vídeo).")
+    parser.add_argument("--hdf5-dir", type=Path, default=None,
+                         help="Pasta gerada por scripts/download_libero_hdf5.py; "
+                              "se passada, treina lendo HDF5 nativo (128x128, sem "
+                              "decodificação de imagem nenhuma -- ver "
+                              "docs/hdf5_migration.md). Mutuamente exclusivo com "
+                              "--preprocessed-dir.")
     parser.add_argument("--checkpoint-dir", default=None,
                          help="Sobrescreve o diretório de checkpoints (padrão: get_checkpoint_dir).")
     args = parser.parse_args()
@@ -206,7 +258,12 @@ def main() -> None:
     set_seed(cfg["seed"])  # pesos, dropout, z, shuffle -- não só o split
     enable_fast_matmul()   # TF32 (Ampere+) + cudnn.benchmark; no-op na T4
 
-    if args.preprocessed_dir is not None:
+    assert not (args.preprocessed_dir is not None and args.hdf5_dir is not None), (
+        "--preprocessed-dir e --hdf5-dir são mutuamente exclusivos -- escolha uma origem de dados."
+    )
+    if args.hdf5_dir is not None:
+        train_loader, val_loader, bridge = build_data_hdf5(cfg, device, args.hdf5_dir)
+    elif args.preprocessed_dir is not None:
         train_loader, val_loader, bridge = build_data_preprocessed(
             cfg, device, args.preprocessed_dir
         )

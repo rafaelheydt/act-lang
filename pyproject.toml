@@ -18,8 +18,9 @@ dependencies = [
 #   pip install "lerobot[libero]"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "h5py"]
 language = ["sentence-transformers"]  # Fase 3: mecanismos de fusão de linguagem
+hdf5 = ["h5py", "huggingface_hub"]  # caminho de dados HDF5 nativo -- ver docs/hdf5_migration.md
 
 [tool.setuptools.packages.find]
 where = ["src"]
