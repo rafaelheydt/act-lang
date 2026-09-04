@@ -6,6 +6,11 @@ sem a parte específica de Colab). Uso local/servidor:
 
 Pré-requisito (uma vez, no terminal, dentro do seu ambiente):
     pip install -e ".[language]" "lerobot[libero]"
+
+`lerobot[libero]` só é necessário pro caminho SEM --preprocessed-dir/--hdf5-dir
+(vídeo bruto, build_data()) -- é importado sob demanda dentro dessa função,
+não no topo do módulo, então os caminhos --preprocessed-dir e --hdf5-dir
+funcionam sem essa dependência pesada instalada (ver docs/hdf5_migration.md).
 """
 
 import argparse
@@ -28,7 +33,6 @@ if str(_REPO_ROOT) not in sys.path:
 os.environ.setdefault("MUJOCO_GL", "egl")
 
 import torch
-from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 
 from act_lang.data.libero import (
     REPO_ID, LiberoActBridge, filter_episodes_by_tasks, get_episode_task_labels,
@@ -170,6 +174,11 @@ def build_data_hdf5(cfg: dict, device: torch.device, root):
 
 
 def build_data(cfg: dict, device: torch.device):
+    # import local (não no topo do arquivo): lerobot[libero] é uma dependência
+    # pesada, instalada à parte (ver docstring do módulo) -- só necessária
+    # neste caminho (vídeo bruto), não em build_data_preprocessed/build_data_hdf5.
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+
     meta = LeRobotDatasetMetadata(REPO_ID)
     full_dataset = LeRobotDataset(REPO_ID)
 

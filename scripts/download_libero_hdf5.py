@@ -23,11 +23,16 @@ Uso:
     python scripts/download_libero_hdf5.py --out data/libero_hdf5 --skip-stats
     # depois, só stats (não rebaixa nada já presente):
     python scripts/download_libero_hdf5.py --out data/libero_hdf5
+
+    # piloto rápido: só as N primeiras tarefas (ordem alfabética,
+    # determinística) -- ~700-800MB x N em vez de ~28-32GB. root/task_mapping.json
+    # fica com só essas N entradas, então HDF5LiberoDataset/train.py já
+    # treinam só nelas automaticamente, mesmo com cfg["task_texts"] = as 40.
+    python scripts/download_libero_hdf5.py --out data/libero_hdf5_piloto --limit 3
 """
 
 import argparse
 import json
-import shutil
 import sys
 from pathlib import Path
 
@@ -54,10 +59,23 @@ def main() -> None:
                          help="Só baixa os arquivos, não escreve meta.json "
                               "(o scan de stats lê os 40 arquivos inteiros -- "
                               "útil separar do download em sessões curtas).")
+    parser.add_argument("--limit", type=int, default=None,
+                         help="Baixa só as N primeiras tarefas (ordem alfabética "
+                              "do texto da tarefa, determinística) em vez das 40 -- "
+                              "pra um piloto rápido antes de comprometer ~28-32GB. "
+                              "root/task_mapping.json fica só com essas N entradas.")
     args = parser.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
-    shutil.copy(TASK_MAPPING_SRC, args.out / TASK_MAPPING_NAME)
+    full_mapping = json.loads(TASK_MAPPING_SRC.read_text(encoding="utf-8"))["tasks"]
+    if args.limit is not None:
+        chosen = dict(sorted(full_mapping.items())[: args.limit])
+        assert chosen, f"--limit {args.limit} não deixou nenhuma tarefa"
+    else:
+        chosen = full_mapping
+    (args.out / TASK_MAPPING_NAME).write_text(
+        json.dumps({"tasks": chosen}, ensure_ascii=False, indent=1)
+    )
     mapping = load_task_mapping(args.out)
 
     print(f"{len(mapping)} tarefas -> baixando de {HF_REPO_ID} em {args.out} "
@@ -73,7 +91,7 @@ def main() -> None:
         print("stats puladas (--skip-stats); rode de novo sem a flag pra gerar o meta.json.")
         return
 
-    print("computando stats (min/max de action/observation.state, escaneando os 40 arquivos)...")
+    print(f"computando stats (min/max de action/observation.state, escaneando os {len(mapping)} arquivos)...")
     stats = compute_stats(args.out, mapping)
     meta = {"version": HDF5_VERSION, "resolution": 128, "stats": stats}
     (args.out / META_NAME).write_text(json.dumps(meta, ensure_ascii=False, indent=1))
