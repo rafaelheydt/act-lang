@@ -21,6 +21,7 @@ dependencies = [
 dev = ["pytest", "h5py"]
 language = ["sentence-transformers"]  # Fase 3: mecanismos de fusão de linguagem
 hdf5 = ["h5py", "huggingface_hub"]  # caminho de dados HDF5 nativo -- ver docs/hdf5_migration.md
+vlm = ["transformers"]  # protótipo: scripts/diagnose_siglip_patch_alignment.py
 
 [tool.setuptools.packages.find]
 where = ["src"]
