@@ -14,6 +14,13 @@ mostra que costuma ser ruidosa sem ajustes extras, e imagens de câmera de
 robô em simulação são bem fora da distribuição de fotos web que o SigLIP viu
 no pré-treino.
 
+Por padrão, compara DOIS checkpoints lado a lado: SigLIP 1 e SigLIP 2. O
+SigLIP 2 (arXiv 2502.14786) foi treinado com self-distillation + masked
+prediction adicionais especificamente para melhorar features densas --
+exatamente o ponto fraco acima -- no mesmo porte de checkpoint (custo
+computacional igual). Use --model-names pra mudar quais checkpoints
+comparar.
+
 Puramente exploratório -- não toca em src/act_lang/models nem fusion/, não
 faz parte do pipeline de treino.
 
@@ -29,10 +36,14 @@ libero_single_task.
 
 NOTA: não testei este script ao vivo (sem dataset local nesta máquina) --
 revisei com cuidado, mas rode primeiro com --n-samples 2 pra conferir que
-tudo carrega certo antes de confiar nos heatmaps. As APIs internas do
-SiglipModel (visual_projection/text_projection) variam um pouco entre
-versões do `transformers`; o código abaixo tolera a ausência delas (ver
-`_maybe_project`).
+tudo carrega certo antes de confiar nos heatmaps. Dois pontos de incerteza
+tolerados no código:
+  - As APIs internas do SiglipModel (visual_projection/text_projection)
+    variam um pouco entre versões do `transformers` -- ver `_maybe_project`.
+  - O nome exato do checkpoint SigLIP 2 base no Hub não foi confirmado
+    literalmente (só "google/siglip2-so400m-patch14-384" foi visto
+    confirmado) -- se "google/siglip2-base-patch16-224" não existir, o
+    script avisa e segue só com os modelos que carregaram.
 """
 
 import argparse
@@ -51,6 +62,11 @@ import torch.nn.functional as F
 from PIL import Image
 
 from act_lang.utils.runtime import pick_device
+
+DEFAULT_MODEL_NAMES = [
+    "google/siglip-base-patch16-224",
+    "google/siglip2-base-patch16-224",
+]
 
 
 def load_dataset(args):
@@ -82,6 +98,27 @@ def _maybe_project(module_or_none, x: torch.Tensor) -> torch.Tensor:
     return module_or_none(x)
 
 
+def load_siglip_models(model_names: list[str], device) -> dict[str, tuple]:
+    """{nome: (model, processor, grid)} -- pula (com aviso) checkpoints que
+    falharem ao carregar, em vez de derrubar o script inteiro."""
+    from transformers import SiglipModel, SiglipProcessor
+
+    models = {}
+    for name in model_names:
+        print(f"carregando {name}...")
+        try:
+            model = SiglipModel.from_pretrained(name).to(device).eval()
+            processor = SiglipProcessor.from_pretrained(name)
+        except Exception as e:  # nome de checkpoint incerto -- ver docstring do módulo
+            print(f"  AVISO: falha ao carregar '{name}' ({e}) -- pulando. Confira o id exato "
+                  f"em https://huggingface.co/models?search={name.split('/')[-1]}")
+            continue
+        grid = model.config.vision_config.image_size // model.config.vision_config.patch_size
+        models[name] = (model, processor, grid)
+    assert models, "nenhum modelo carregado com sucesso -- confira --model-names"
+    return models
+
+
 @torch.no_grad()
 def encode_text(model, processor, texts: list[str], device) -> torch.Tensor:
     inputs = processor(text=texts, padding="max_length", return_tensors="pt").to(device)
@@ -110,22 +147,29 @@ def similarity_heatmap(patch_embeds: torch.Tensor, text_embed: torch.Tensor,
     return upsampled[0, 0].cpu().numpy()
 
 
-def save_comparison(image_np, heatmap_correct, heatmap_wrong, task_correct, task_wrong,
-                     sim_max_correct, sim_max_wrong, out_path: Path) -> None:
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4.5))
-    axes[0].imshow(image_np)
-    axes[0].set_title("imagem original", fontsize=9)
-    axes[0].axis("off")
+def save_comparison(image_np, per_model_results: list[tuple], task_correct: str, task_wrong: str,
+                     out_path: Path) -> None:
+    """per_model_results: lista de (nome_modelo, heatmap_correct, heatmap_wrong,
+    sim_max_correct, sim_max_wrong) -- uma linha do grid por modelo."""
+    n_models = len(per_model_results)
+    fig, axes = plt.subplots(n_models, 3, figsize=(13, 4.5 * n_models), squeeze=False)
 
-    panels = [
-        (axes[1], heatmap_correct, task_correct, sim_max_correct, "instrução CERTA"),
-        (axes[2], heatmap_wrong, task_wrong, sim_max_wrong, "instrução ERRADA"),
-    ]
-    for ax, heatmap, task, sim_max, label in panels:
-        ax.imshow(image_np)
-        ax.imshow(heatmap, cmap="jet", alpha=0.5)
-        ax.set_title(f"{label}\n\"{task[:40]}\"\nsim_max={sim_max:.3f}", fontsize=8)
-        ax.axis("off")
+    for row, (model_name, heatmap_correct, heatmap_wrong, sim_max_correct, sim_max_wrong) in enumerate(
+        per_model_results
+    ):
+        axes[row][0].imshow(image_np)
+        axes[row][0].set_title(f"{model_name}\nimagem original", fontsize=8)
+        axes[row][0].axis("off")
+
+        panels = [
+            (axes[row][1], heatmap_correct, task_correct, sim_max_correct, "instrução CERTA"),
+            (axes[row][2], heatmap_wrong, task_wrong, sim_max_wrong, "instrução ERRADA"),
+        ]
+        for ax, heatmap, task, sim_max, label in panels:
+            ax.imshow(image_np)
+            ax.imshow(heatmap, cmap="jet", alpha=0.5)
+            ax.set_title(f"{label}\n\"{task[:40]}\"\nsim_max={sim_max:.3f}", fontsize=8)
+            ax.axis("off")
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
@@ -140,15 +184,15 @@ def main() -> None:
     src.add_argument("--hdf5-dir", type=Path, default=None,
                       help="Pasta gerada por scripts/download_libero_hdf5.py")
     parser.add_argument("--n-samples", type=int, default=6)
-    parser.add_argument("--model-name", default="google/siglip-base-patch16-224",
-                         help="Trocar por google/siglip-so400m-patch14-384 (backbone do PaliGemma) "
-                              "se o resultado do base parecer promissor.")
+    parser.add_argument("--model-names", nargs="+", default=DEFAULT_MODEL_NAMES,
+                         help="Um ou mais checkpoints SigLIP a comparar lado a lado. Default: "
+                              "SigLIP 1 base vs. SigLIP 2 base (mesmo porte, SigLIP 2 treinado "
+                              "pra features densas melhores). Ex. de checkpoint maior: "
+                              "google/siglip-so400m-patch14-384 (backbone do PaliGemma).")
     parser.add_argument("--output-dir", type=Path, default=Path("siglip_patch_alignment_outputs"))
     parser.add_argument("--device-index", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0, help="Seed pra escolha da 'instrução errada'.")
     args = parser.parse_args()
-
-    from transformers import SiglipModel, SiglipProcessor
 
     random.seed(args.seed)
     device = pick_device(preferred_index=args.device_index)
@@ -171,46 +215,55 @@ def main() -> None:
         for task in tasks_correct
     ]
 
-    print(f"carregando {args.model_name}...")
-    model = SiglipModel.from_pretrained(args.model_name).to(device).eval()
-    processor = SiglipProcessor.from_pretrained(args.model_name)
-    grid = model.config.vision_config.image_size // model.config.vision_config.patch_size
-
+    models = load_siglip_models(args.model_names, device)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    text_embeds_correct = encode_text(model, processor, tasks_correct, device)
-    text_embeds_wrong = encode_text(model, processor, tasks_wrong, device)
+    text_embeds_correct = {
+        name: encode_text(model, proc, tasks_correct, device) for name, (model, proc, _grid) in models.items()
+    }
+    text_embeds_wrong = {
+        name: encode_text(model, proc, tasks_wrong, device) for name, (model, proc, _grid) in models.items()
+    }
 
-    diffs = []
+    diffs_by_model: dict[str, list[float]] = {name: [] for name in models}
     for i, sample in enumerate(samples):
         image_tensor = sample["observation.images.image"]  # (3,H,W) float32 [0,1]
         image_np = image_tensor.permute(1, 2, 0).numpy()
         pil_image = Image.fromarray((image_np * 255).astype(np.uint8))
-
-        patch_embeds = encode_image_patches(model, processor, pil_image, device)
         image_hw = image_np.shape[:2]
-        heatmap_correct = similarity_heatmap(patch_embeds, text_embeds_correct[i], grid, image_hw)
-        heatmap_wrong = similarity_heatmap(patch_embeds, text_embeds_wrong[i], grid, image_hw)
 
-        sim_max_correct = float(heatmap_correct.max())
-        sim_max_wrong = float(heatmap_wrong.max())
-        diffs.append(sim_max_correct - sim_max_wrong)
+        per_model_results = []
+        summary_parts = []
+        for name, (model, processor, grid) in models.items():
+            patch_embeds = encode_image_patches(model, processor, pil_image, device)
+            heatmap_correct = similarity_heatmap(patch_embeds, text_embeds_correct[name][i], grid, image_hw)
+            heatmap_wrong = similarity_heatmap(patch_embeds, text_embeds_wrong[name][i], grid, image_hw)
+
+            sim_max_correct = float(heatmap_correct.max())
+            sim_max_wrong = float(heatmap_wrong.max())
+            diff = sim_max_correct - sim_max_wrong
+            diffs_by_model[name].append(diff)
+
+            per_model_results.append((name, heatmap_correct, heatmap_wrong, sim_max_correct, sim_max_wrong))
+            summary_parts.append(f"{name}: diff={diff:+.3f}")
 
         out_path = args.output_dir / f"sample_{i:02d}.png"
-        save_comparison(image_np, heatmap_correct, heatmap_wrong, tasks_correct[i], tasks_wrong[i],
-                         sim_max_correct, sim_max_wrong, out_path)
-        print(f"[{i}] certa=\"{tasks_correct[i][:50]}\" (sim_max={sim_max_correct:.3f}) | "
-              f"errada=\"{tasks_wrong[i][:50]}\" (sim_max={sim_max_wrong:.3f}) | "
-              f"diff={diffs[-1]:+.3f} -> {out_path}")
+        save_comparison(image_np, per_model_results, tasks_correct[i], tasks_wrong[i], out_path)
+        print(f"[{i}] certa=\"{tasks_correct[i][:50]}\" | errada=\"{tasks_wrong[i][:50]}\" | "
+              f"{' | '.join(summary_parts)} -> {out_path}")
 
-    mean_diff = sum(diffs) / len(diffs)
-    print(f"\n=== diff médio (sim_max certa - sim_max errada) nas {len(samples)} amostras: {mean_diff:+.4f} ===")
-    print("Como interpretar: diff consistentemente positivo e claramente > 0 nas amostras é sinal de")
-    print("que a similaridade patch-a-patch é específica da instrução -- o gate teria informação real")
-    print("pra explorar. diff perto de zero, ou heatmaps visualmente quase idênticos entre instrução")
+    print(f"\n=== diff médio (sim_max certa - sim_max errada) nas {len(samples)} amostras, por modelo ===")
+    for name, diffs in diffs_by_model.items():
+        mean_diff = sum(diffs) / len(diffs)
+        print(f"  {name}: {mean_diff:+.4f}")
+    print()
+    print("Como interpretar: diff consistentemente positivo e claramente > 0 é sinal de que a")
+    print("similaridade patch-a-patch é específica da instrução -- o gate teria informação real pra")
+    print("explorar. diff perto de zero, ou heatmaps visualmente quase idênticos entre instrução")
     print("certa/errada nos PNGs salvos, confirma o risco: o sinal é saliência genérica, não")
-    print("alinhamento com a linguagem, e o gate zero-parâmetro provavelmente não vale a pena sem")
-    print("alguma forma de calibração/fine-tuning.")
+    print("alinhamento com a linguagem. Se um modelo tiver diff claramente maior que o outro, é o")
+    print("candidato certo pra uma eventual integração; se todos vierem perto de zero, o gate")
+    print("zero-parâmetro provavelmente não vale a pena sem alguma forma de calibração/fine-tuning.")
 
 
 if __name__ == "__main__":
