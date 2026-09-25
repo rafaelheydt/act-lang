@@ -8,23 +8,34 @@ verifica com dados reais do LIBERO se o mapa de relevância imagem-texto de
 cada método é (a) espacialmente concentrado no objeto/ação certo e (b) MUDA
 quando a instrução muda.
 
-Compara QUATRO métodos por padrão, do mais fraco ao mais forte sinal
-espacial esperado:
-  1-2. SigLIP 1 e SigLIP 2 -- similaridade de cosseno patch-a-patho. Treino
-       contrastivo sobre um vetor GLOBAL (pooled), sem supervisão espacial
-       -- literatura de dense-prediction zero-shot (MaskCLIP, GEM) mostra
-       que costuma ser ruidoso sem ajustes extras. SigLIP 2 (arXiv
-       2502.14786) foi treinado especificamente pra melhorar isso, mesmo
-       porte de checkpoint.
-  3. CLIPSeg (Lüddecke & Ecker, CVPR 2022, arXiv 2112.10003) -- decoder leve
+Compara CINCO métodos por padrão:
+  1. CLIP -- similaridade de cosseno patch-a-patch, mesmo esquema do SigLIP
+       abaixo. Baseline de contraste: isola se o ruído visto no SigLIP é
+       específico dele ou fundamental de qualquer encoder só-contrastivo
+       (o CLIPSeg, item 4, é construído sobre CLIP, não SigLIP).
+  2-3. SigLIP 1 e SigLIP 2 -- mesmo esquema. Treino contrastivo sobre um
+       vetor GLOBAL (pooled), sem supervisão espacial -- literatura de
+       dense-prediction zero-shot (MaskCLIP, GEM) mostra que costuma ser
+       ruidoso sem ajustes extras. SigLIP 2 (arXiv 2502.14786) foi treinado
+       especificamente pra melhorar isso, mesmo porte de checkpoint.
+  4. CLIPSeg (Lüddecke & Ecker, CVPR 2022, arXiv 2112.10003) -- decoder leve
        treinado sobre CLIP congelado especificamente para segmentação a
        partir de texto; já produz um mapa contínuo direto (sem produto
        escalar manual).
-  4. Grounded SAM = Grounding DINO (texto -> caixa, arXiv 2303.05499) + SAM
+  5. Grounded SAM = Grounding DINO (texto -> caixa, arXiv 2303.05499) + SAM
        (caixa -> máscara de pixel) -- o mais preciso, treinado com
        supervisão de localização de verdade, mas o mais pesado (dois
        modelos encadeados) e o mais distante da ideia original de "gate
        zero-parâmetro barato".
+
+Achado do primeiro run (SigLIP1/SigLIP2/CLIPSeg, 6 amostras, cena do
+LIBERO): SigLIP 1 e 2 confirmaram o risco (diff certa-errada ~0, sinal
+ruído genérico, sem vantagem clara do SigLIP 2 sobre o 1 nessa amostra).
+CLIPSeg localiza bem quando os objetos comparados são categorias diferentes
+(ex. lata de sopa vs. gaveta), mas confunde instruções sobre o MESMO objeto
+físico (ex. "gaveta de cima" vs. "gaveta do meio" do mesmo armário) -- diff
+médio negativo em 4/6 amostras, sugerindo que reconhece categoria de objeto
+mas não resolve relação espacial/ordinal fina.
 
 Imagens de câmera de robô em simulação são fora da distribuição de todos
 esses modelos (treinados em fotos/dados web) -- por isso a comparação, em
@@ -81,6 +92,7 @@ from PIL import Image
 
 from act_lang.utils.runtime import pick_device
 
+DEFAULT_CLIP_MODEL = "openai/clip-vit-base-patch16"
 DEFAULT_SIGLIP_MODELS = [
     "google/siglip-base-patch16-224",
     "google/siglip2-base-patch16-224",
@@ -170,6 +182,49 @@ class SiglipScorer:
         return sim.view(self.grid, self.grid).cpu().numpy()
 
 
+class ClipScorer:
+    """Mesmo esquema do SiglipScorer (produto escalar patch-a-patch), mas
+    com CLIP -- baseline de contraste pra isolar se o ruído visto no SigLIP
+    é específico dele ou fundamental de qualquer encoder só-contrastivo.
+    Duas diferenças em relação ao SigLIP: o ViT do CLIP tem um token CLS
+    prependado em last_hidden_state (descartado abaixo antes do reshape), e
+    o tokenizer de texto usa padding dinâmico normal (sem o gotcha
+    padding="max_length" que o SigLIP exige)."""
+
+    def __init__(self, model_name: str, device):
+        from transformers import CLIPModel, CLIPProcessor
+
+        self.name = model_name
+        self.device = device
+        self.model = CLIPModel.from_pretrained(model_name).to(device).eval()
+        self.processor = CLIPProcessor.from_pretrained(model_name)
+        self.grid = self.model.config.vision_config.image_size // self.model.config.vision_config.patch_size
+        self._text_cache: dict[str, torch.Tensor] = {}
+
+    @torch.no_grad()
+    def _encode_text(self, text: str) -> torch.Tensor:
+        if text not in self._text_cache:
+            inputs = self.processor(text=[text], padding=True, return_tensors="pt").to(self.device)
+            pooled = self.model.text_model(**inputs).pooler_output
+            embed = _maybe_project(getattr(self.model, "text_projection", None), pooled)
+            self._text_cache[text] = F.normalize(embed, dim=-1)[0]
+        return self._text_cache[text]
+
+    @torch.no_grad()
+    def score(self, pil_image: Image.Image, text: str) -> np.ndarray:
+        inputs = self.processor(images=[pil_image], return_tensors="pt").to(self.device)
+        patch_hidden = self.model.vision_model(**inputs).last_hidden_state[:, 1:, :]  # descarta o token CLS (posição 0)
+        patch_embed = _maybe_project(getattr(self.model, "visual_projection", None), patch_hidden)
+        patch_embed = F.normalize(patch_embed, dim=-1)[0]  # (n_patches, proj_dim)
+
+        text_embed = self._encode_text(text)
+        sim = patch_embed @ text_embed  # (n_patches,)
+        assert self.grid * self.grid == sim.shape[0], (
+            f"{self.name}: grid {self.grid}x{self.grid} não bate com {sim.shape[0]} patches (após descartar CLS)"
+        )
+        return sim.view(self.grid, self.grid).cpu().numpy()
+
+
 class ClipSegScorer:
     def __init__(self, model_name: str, device):
         from transformers import CLIPSegForImageSegmentation, CLIPSegProcessor
@@ -253,6 +308,14 @@ class GroundedSamScorer:
 def build_scorers(args, device) -> list:
     scorers = []
 
+    if not args.skip_clip:
+        print(f"carregando {args.clip_model}...")
+        try:
+            scorers.append(ClipScorer(args.clip_model, device))
+        except Exception as e:
+            print(f"  AVISO: falha ao carregar CLIP '{args.clip_model}' ({e}) -- pulando. Confira o id exato "
+                  f"em https://huggingface.co/models?search={args.clip_model.split('/')[-1]}")
+
     if not args.skip_siglip:
         for name in args.siglip_models:
             print(f"carregando {name}...")
@@ -324,6 +387,8 @@ def main() -> None:
     parser.add_argument("--device-index", type=int, default=None)
     parser.add_argument("--seed", type=int, default=0, help="Seed pra escolha da 'instrução errada'.")
 
+    parser.add_argument("--clip-model", default=DEFAULT_CLIP_MODEL,
+                         help="Checkpoint CLIP -- baseline de contraste com o esquema do SigLIP.")
     parser.add_argument("--siglip-models", nargs="+", default=DEFAULT_SIGLIP_MODELS,
                          help="Checkpoints SigLIP a comparar. Default: SigLIP 1 base vs. SigLIP 2 base.")
     parser.add_argument("--clipseg-model", default=DEFAULT_CLIPSEG_MODEL)
@@ -332,6 +397,7 @@ def main() -> None:
     parser.add_argument("--box-threshold", type=float, default=0.3)
     parser.add_argument("--text-threshold", type=float, default=0.25)
 
+    parser.add_argument("--skip-clip", action="store_true")
     parser.add_argument("--skip-siglip", action="store_true")
     parser.add_argument("--skip-clipseg", action="store_true")
     parser.add_argument("--skip-grounded-sam", action="store_true")
