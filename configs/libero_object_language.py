@@ -66,7 +66,14 @@ def make_config(fusion_type: str, backbone_type: str = "resnet18") -> dict:
         "weight_decay": 1e-4,
         "num_epochs": 300,
         "kl_weight": 10.0,
-        "free_bits": 0.0,  # 0.0 = fiel ao KL cru do ACT oficial (sem free bits)
+        "kl_warmup_epochs": 10,  # annealing linear 0->kl_weight -- mesma correção de
+        # libero_40tasks_language.py (diagnóstico de 31/08, decoder ignorando z):
+        # sem isso, kl_weight=10 em força total desde a época 1 colapsa o
+        # posterior rápido (visto ao vivo: |mu| e kld indo a ~0 em 4 épocas
+        # com backbone_type="clip_vitb32").
+        "free_bits": 0.05,  # reativado -- mesma correção (diagnóstico de colapso de
+        # posterior em 30/08) -- 0.0 (valor anterior) não dava nenhuma folga
+        # de KL por dimensão, incentivando o otimizador a zerar z rápido demais.
         "grad_clip_norm": 10.0,
         "checkpoint_every": 50,
         # rollout -- mesma ressalva da Fase 2: com 10 tarefas, cada uma
