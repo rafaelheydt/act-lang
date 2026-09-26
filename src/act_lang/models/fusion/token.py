@@ -21,9 +21,10 @@ class TokenFusion(LanguageFusion):
         d_model: int,
         text_model_name: str = DEFAULT_TEXT_MODEL,
         text_embed_dim: int = DEFAULT_TEXT_EMBED_DIM,
+        text_encoder=None,
     ):
         super().__init__()
-        self._text_encoder = TextEmbeddingCache(text_model_name)
+        self._text_encoder = text_encoder if text_encoder is not None else TextEmbeddingCache(text_model_name)
         self.proj = nn.Linear(text_embed_dim, d_model)  # única parte treinável
 
     def encode_text(self, texts: list[str], device: torch.device) -> torch.Tensor:

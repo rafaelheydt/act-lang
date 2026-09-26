@@ -27,9 +27,10 @@ class FiLMFusion(LanguageFusion):
         d_model: int,
         text_model_name: str = DEFAULT_TEXT_MODEL,
         text_embed_dim: int = DEFAULT_TEXT_EMBED_DIM,
+        text_encoder=None,
     ):
         super().__init__()
-        self._text_encoder = TextEmbeddingCache(text_model_name)
+        self._text_encoder = text_encoder if text_encoder is not None else TextEmbeddingCache(text_model_name)
         self.to_gamma_beta = nn.Linear(text_embed_dim, 2 * d_model)
         nn.init.zeros_(self.to_gamma_beta.weight)
         nn.init.zeros_(self.to_gamma_beta.bias)

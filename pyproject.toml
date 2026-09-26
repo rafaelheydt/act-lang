@@ -18,10 +18,14 @@ dependencies = [
 #   pip install "lerobot[libero]"
 
 [project.optional-dependencies]
-dev = ["pytest", "h5py"]
+dev = ["pytest", "h5py", "transformers", "sentencepiece"]
 language = ["sentence-transformers"]  # Fase 3: mecanismos de fusão de linguagem
 hdf5 = ["h5py", "huggingface_hub"]  # caminho de dados HDF5 nativo -- ver docs/hdf5_migration.md
-vlm = ["transformers"]  # protótipo: scripts/diagnose_siglip_patch_alignment.py
+# backbones pareados CLIP ViT-B/32 / SigLIP2-base (models/backbones/,
+# fusion/text_encoder_{clip,siglip}.py) -- e scripts/diagnose_siglip_patch_alignment.py.
+# sentencepiece: exigido pelo tokenizer do SigLIP2 (AutoTokenizer resolve pra
+# um tokenizer estilo Gemma que depende dele).
+vlm = ["transformers", "sentencepiece"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

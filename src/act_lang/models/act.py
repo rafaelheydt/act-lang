@@ -8,7 +8,7 @@ CORREÇÕES aplicadas em relação ao notebook original (revisão de agosto/2026
      (`extra_pos_embed`), equivalente ao `additional_pos_embed` do original.
   3. `forward(..., sample_posterior=False)` permite validação determinística
      com z = mu, separando ruído de amostragem do sinal de val_loss.
-  4. Normalização ImageNet embutida no VisionBackbone (ver backbone.py).
+  4. Normalização de imagem embutida em cada backbone (ver models/backbones/).
 
 Ablação opcional (desligada por padrão): `decoder_style="detr"` troca o
 nn.TransformerDecoder de prateleira (posição injetada 1x na entrada) por um
@@ -25,7 +25,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from .backbone import VisionBackbone
+from .backbones import build_vision_backbone
 from .decoder_detr import DETRStyleDecoder
 from .encoder_detr import DETRStyleEncoder
 from .fusion.base import LanguageFusion
@@ -113,6 +113,7 @@ class ACT(nn.Module):
         pretrained_backbone: bool = True,
         fusion: Optional[LanguageFusion] = None,
         decoder_style: str = "torch",
+        backbone_type: str = "resnet18",
     ):
         super().__init__()
         self.chunk_size = chunk_size
@@ -123,7 +124,9 @@ class ACT(nn.Module):
         assert decoder_style in ("torch", "detr"), decoder_style
         self.decoder_style = decoder_style
 
-        self.vision_backbone = VisionBackbone(d_model, pretrained=pretrained_backbone)
+        # backbone_type: "resnet18" (default, comportamento intocado) |
+        # "clip_vitb32" | "siglip2_base" -- ver models/backbones/factory.py.
+        self.vision_backbone = build_vision_backbone(backbone_type, d_model, pretrained=pretrained_backbone)
         self.state_proj = nn.Linear(state_dim, d_model)
         self.latent_proj = nn.Linear(latent_dim, d_model)
         self.cvae_encoder = CVAEEncoder(

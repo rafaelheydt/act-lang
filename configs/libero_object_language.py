@@ -7,20 +7,35 @@ científico a esta fase: quanto a linguagem melhora em relação a não ter
 instrução nenhuma? E comparar os 3 experimentos abaixo entre si é a
 pergunta central da dissertação: qual mecanismo de fusão funciona melhor?
 
-`make_config(fusion_type)` gera os 3 configs a partir de uma base
-compartilhada -- evita triplicar ~60 linhas quase idênticas, mas cada
-CONFIG_* continua sendo um dict comum, do jeito que o resto do projeto
-(notebooks, fit(), etc.) já espera.
+`make_config(fusion_type, backbone_type)` gera os configs a partir de uma
+base compartilhada -- evita triplicar/duplicar dezenas de linhas quase
+idênticas, mas cada CONFIG_* continua sendo um dict comum, do jeito que o
+resto do projeto (notebooks, fit(), etc.) já espera.
+
+`backbone_type` (ablação de backbones pareados, ver docs/hdf5_migration.md
+e models/backbones/): "resnet18" (default, ResNet18+MiniLM, comportamento
+original) | "clip_vitb32" (CLIP ViT-B/32, imagem+texto pareados) |
+"siglip2_base" (SigLIP2-base-patch16-224, imagem+texto pareados). Os
+backbones novos vêm CONGELADOS por padrão (`freeze_vision_backbone`) --
+são ~8x maiores que o ResNet18 atual, pré-treinados em escala muito maior;
+fine-tuning completo com o pouco dado do LIBERO arrisca destruir a
+representação pré-treinada sem ganho compensador claro.
 """
 
 from configs.libero_object_multitask import TASK_TEXTS_LIBERO_OBJECT_10
 
+_BACKBONE_TYPES = ("resnet18", "clip_vitb32", "siglip2_base")
 
-def make_config(fusion_type: str) -> dict:
+
+def make_config(fusion_type: str, backbone_type: str = "resnet18") -> dict:
     assert fusion_type in ("token", "film", "cross_attn"), fusion_type
+    assert backbone_type in _BACKBONE_TYPES, backbone_type
+    name_suffix = fusion_type if backbone_type == "resnet18" else f"{backbone_type}_{fusion_type}"
     return {
-        "experiment_name": f"libero_v2_10tasks_lingua_{fusion_type}",
+        "experiment_name": f"libero_v2_10tasks_lingua_{name_suffix}",
         "device_index": None,  # None = auto (GPU com mais memória livre)
+        "backbone_type": backbone_type,
+        "freeze_vision_backbone": backbone_type != "resnet18",
         # dados -- MESMAS 10 tarefas e split da Fase 2, pra comparação direta
         "task_texts": TASK_TEXTS_LIBERO_OBJECT_10,
         "task_suite_name": "libero_object",
@@ -63,13 +78,32 @@ def make_config(fusion_type: str) -> dict:
     }
 
 
-CONFIG_TOKEN = make_config("token")
+CONFIG_TOKEN = make_config("token")          # ResNet18 original -- inalterado
 CONFIG_FILM = make_config("film")
 CONFIG_CROSS_ATTN = make_config("cross_attn")
 
-# Import padrão do notebook: troque qual das 3 linhas fica descomentada
+# Ablação leve: os 2 backbones novos x os 3 mecanismos de fusão já
+# existentes -- FiLM é a prioridade (CONFIG_CLIP_FILM/CONFIG_SIGLIP_FILM),
+# Token/CrossAttention continuam disponíveis sem precisar de código
+# especial por combinação.
+_ABLATION_BACKBONES = ("clip_vitb32", "siglip2_base")
+_ABLATION_FUSIONS = ("token", "film", "cross_attn")
+ABLATION_CONFIGS = {
+    (backbone, fusion): make_config(fusion, backbone_type=backbone)
+    for backbone in _ABLATION_BACKBONES for fusion in _ABLATION_FUSIONS
+}
+CONFIG_CLIP_FILM = ABLATION_CONFIGS[("clip_vitb32", "film")]
+CONFIG_SIGLIP_FILM = ABLATION_CONFIGS[("siglip2_base", "film")]
+CONFIG_CLIP_TOKEN = ABLATION_CONFIGS[("clip_vitb32", "token")]
+CONFIG_CLIP_CROSS_ATTN = ABLATION_CONFIGS[("clip_vitb32", "cross_attn")]
+CONFIG_SIGLIP_TOKEN = ABLATION_CONFIGS[("siglip2_base", "token")]
+CONFIG_SIGLIP_CROSS_ATTN = ABLATION_CONFIGS[("siglip2_base", "cross_attn")]
+
+# Import padrão do notebook: troque qual das linhas fica descomentada
 # pra rodar cada experimento (experiment_name diferente -> checkpoints
 # não se sobrescrevem).
 CONFIG = CONFIG_TOKEN
 # CONFIG = CONFIG_FILM
 # CONFIG = CONFIG_CROSS_ATTN
+# CONFIG = CONFIG_CLIP_FILM
+# CONFIG = CONFIG_SIGLIP_FILM

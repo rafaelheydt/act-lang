@@ -35,9 +35,10 @@ class CrossAttentionFusion(LanguageFusion):
         n_heads: int = 8,
         text_model_name: str = DEFAULT_TEXT_MODEL,
         text_embed_dim: int = DEFAULT_TEXT_EMBED_DIM,
+        text_encoder=None,
     ):
         super().__init__()
-        self._text_encoder = TextEmbeddingCache(text_model_name)
+        self._text_encoder = text_encoder if text_encoder is not None else TextEmbeddingCache(text_model_name)
         self.proj = nn.Linear(text_embed_dim, d_model)
         self.cross_attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
         self.norm = nn.LayerNorm(d_model)

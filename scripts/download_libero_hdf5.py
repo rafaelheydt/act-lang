@@ -29,6 +29,11 @@ Uso:
     # fica com só essas N entradas, então HDF5LiberoDataset/train.py já
     # treinam só nelas automaticamente, mesmo com cfg["task_texts"] = as 40.
     python scripts/download_libero_hdf5.py --out data/libero_hdf5_piloto --limit 3
+
+    # só uma suíte oficial específica (ex: as 10 tarefas de libero_object,
+    # usadas por configs/libero_object_language.py e pela ablação de
+    # backbones em configs/libero_object_language.py/libero_40tasks_language.py)
+    python scripts/download_libero_hdf5.py --out data/libero_hdf5_object --suite libero_object
 """
 
 import argparse
@@ -61,18 +66,30 @@ def main() -> None:
                               "útil separar do download em sessões curtas).")
     parser.add_argument("--limit", type=int, default=None,
                          help="Baixa só as N primeiras tarefas (ordem alfabética "
-                              "do texto da tarefa, determinística) em vez das 40 -- "
-                              "pra um piloto rápido antes de comprometer ~28-32GB. "
-                              "root/task_mapping.json fica só com essas N entradas.")
+                              "do texto da tarefa, determinística) -- das 40, ou "
+                              "das tarefas da suíte se --suite também for passado "
+                              "(ex: --suite libero_object --limit 2 baixa só as 2 "
+                              "primeiras, em ordem alfabética, das 10 do "
+                              "libero_object -- útil pra um piloto rápido de "
+                              "validação dentro de uma suíte específica).")
+    parser.add_argument("--suite", default=None,
+                         choices=("libero_object", "libero_spatial", "libero_goal", "libero_10"),
+                         help="Restringe a UMA suíte oficial (campo 'suite' de "
+                              "task_mapping_libero40.json) -- ex: libero_object "
+                              "são as 10 tarefas usadas por "
+                              "configs/libero_object_language.py. Combinável com "
+                              "--limit (aplicado DEPOIS do filtro de suíte).")
     args = parser.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
     full_mapping = json.loads(TASK_MAPPING_SRC.read_text(encoding="utf-8"))["tasks"]
+    chosen = full_mapping
+    if args.suite is not None:
+        chosen = {t: v for t, v in chosen.items() if v["suite"] == args.suite}
+        assert chosen, f"--suite {args.suite!r} não deixou nenhuma tarefa -- confira o nome"
     if args.limit is not None:
-        chosen = dict(sorted(full_mapping.items())[: args.limit])
-        assert chosen, f"--limit {args.limit} não deixou nenhuma tarefa"
-    else:
-        chosen = full_mapping
+        chosen = dict(sorted(chosen.items())[: args.limit])
+        assert chosen, f"--limit {args.limit} não deixou nenhuma tarefa (dentro de --suite={args.suite!r})"
     (args.out / TASK_MAPPING_NAME).write_text(
         json.dumps({"tasks": chosen}, ensure_ascii=False, indent=1)
     )

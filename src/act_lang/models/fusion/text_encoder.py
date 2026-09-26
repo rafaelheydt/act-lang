@@ -47,6 +47,12 @@ class TextEmbeddingCache:
     def __init__(self, model_name: str = DEFAULT_TEXT_MODEL):
         self.model_name = model_name
         self._st_model = None
+        # Fixo (não lido de config): all-MiniLM-L6-v2 é o único modelo usado
+        # aqui na prática. Presente pra dar à classe a MESMA interface de
+        # CLIPTextEmbeddingCache/SiglipTextEmbeddingCache (text_encoder_clip.py/
+        # text_encoder_siglip.py) -- build_model_and_optimizer (scripts/train.py)
+        # lê `.embed_dim` de qualquer uma das três sem precisar saber qual é.
+        self.embed_dim: int = DEFAULT_TEXT_EMBED_DIM
         self._cache: dict[str, torch.Tensor] = {}
         self._token_cache: dict[str, torch.Tensor] = {}
 

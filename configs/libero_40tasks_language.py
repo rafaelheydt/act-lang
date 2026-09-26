@@ -58,11 +58,21 @@ TASK_TEXTS_LIBERO_40 = {
 }
 
 
-def make_config(fusion_type: str) -> dict:
+_BACKBONE_TYPES = ("resnet18", "clip_vitb32", "siglip2_base")
+
+
+def make_config(fusion_type: str, backbone_type: str = "resnet18") -> dict:
     assert fusion_type in ("token", "film", "cross_attn"), fusion_type
+    assert backbone_type in _BACKBONE_TYPES, backbone_type
+    # backbone_type (ablação, ver models/backbones/): "resnet18" (default,
+    # ResNet18+MiniLM original) | "clip_vitb32" | "siglip2_base" (imagem+texto
+    # pareados, congelados por padrão -- ~8x maiores que o ResNet18 atual).
+    name_suffix = fusion_type if backbone_type == "resnet18" else f"{backbone_type}_{fusion_type}"
     return {
-        "experiment_name": f"libero_v2_40tasks_lingua_{fusion_type}",
+        "experiment_name": f"libero_v2_40tasks_lingua_{name_suffix}",
         "device_index": 1,  # 1 = RTX 3050 no seu nvidia-smi; 0 = A2000
+        "backbone_type": backbone_type,
+        "freeze_vision_backbone": backbone_type != "resnet18",
         # dados
         "task_texts": TASK_TEXTS_LIBERO_40,
         "task_suite_name": "libero_40_mixed",  # não é suite oficial pura -- ver docstring
@@ -108,8 +118,25 @@ def make_config(fusion_type: str) -> dict:
     }
 
 
-CONFIG_TOKEN = make_config("token")
+CONFIG_TOKEN = make_config("token")          # ResNet18 original -- inalterado
 CONFIG_FILM = make_config("film")
 CONFIG_CROSS_ATTN = make_config("cross_attn")
+
+# Ablação leve: os 2 backbones novos x os 3 mecanismos de fusão já
+# existentes -- FiLM é a prioridade, Token/CrossAttention continuam
+# disponíveis sem código especial por combinação (ver configs/libero_object_language.py
+# pra explicação completa do raciocínio -- mesmo padrão replicado aqui).
+_ABLATION_BACKBONES = ("clip_vitb32", "siglip2_base")
+_ABLATION_FUSIONS = ("token", "film", "cross_attn")
+ABLATION_CONFIGS = {
+    (backbone, fusion): make_config(fusion, backbone_type=backbone)
+    for backbone in _ABLATION_BACKBONES for fusion in _ABLATION_FUSIONS
+}
+CONFIG_CLIP_FILM = ABLATION_CONFIGS[("clip_vitb32", "film")]
+CONFIG_SIGLIP_FILM = ABLATION_CONFIGS[("siglip2_base", "film")]
+CONFIG_CLIP_TOKEN = ABLATION_CONFIGS[("clip_vitb32", "token")]
+CONFIG_CLIP_CROSS_ATTN = ABLATION_CONFIGS[("clip_vitb32", "cross_attn")]
+CONFIG_SIGLIP_TOKEN = ABLATION_CONFIGS[("siglip2_base", "token")]
+CONFIG_SIGLIP_CROSS_ATTN = ABLATION_CONFIGS[("siglip2_base", "cross_attn")]
 
 CONFIG = CONFIG_FILM

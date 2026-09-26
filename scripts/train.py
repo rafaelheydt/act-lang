@@ -41,6 +41,7 @@ from act_lang.data.libero import (
 from act_lang.data.normalize import MinMaxNormalizer
 from act_lang.models.act import ACT
 from act_lang.models.backbone import freeze_batchnorm
+from act_lang.models.backbones import resolve_text_encoder_spec
 from act_lang.models.fusion import build_fusion
 from act_lang.training.checkpoints import load_checkpoint
 from act_lang.training.loop import fit
@@ -65,6 +66,20 @@ CONFIG_REGISTRY = {
     "language_40_token": ("configs.libero_40tasks_language", "CONFIG_TOKEN"),
     "language_40_film": ("configs.libero_40tasks_language", "CONFIG_FILM"),
     "language_40_cross_attn": ("configs.libero_40tasks_language", "CONFIG_CROSS_ATTN"),
+    # Ablação de backbones pareados (CLIP ViT-B/32 / SigLIP2-base) -- ver
+    # models/backbones/ e docs/hdf5_migration.md.
+    "language_clip_film": ("configs.libero_object_language", "CONFIG_CLIP_FILM"),
+    "language_siglip_film": ("configs.libero_object_language", "CONFIG_SIGLIP_FILM"),
+    "language_clip_token": ("configs.libero_object_language", "CONFIG_CLIP_TOKEN"),
+    "language_clip_cross_attn": ("configs.libero_object_language", "CONFIG_CLIP_CROSS_ATTN"),
+    "language_siglip_token": ("configs.libero_object_language", "CONFIG_SIGLIP_TOKEN"),
+    "language_siglip_cross_attn": ("configs.libero_object_language", "CONFIG_SIGLIP_CROSS_ATTN"),
+    "language_40_clip_film": ("configs.libero_40tasks_language", "CONFIG_CLIP_FILM"),
+    "language_40_siglip_film": ("configs.libero_40tasks_language", "CONFIG_SIGLIP_FILM"),
+    "language_40_clip_token": ("configs.libero_40tasks_language", "CONFIG_CLIP_TOKEN"),
+    "language_40_clip_cross_attn": ("configs.libero_40tasks_language", "CONFIG_CLIP_CROSS_ATTN"),
+    "language_40_siglip_token": ("configs.libero_40tasks_language", "CONFIG_SIGLIP_TOKEN"),
+    "language_40_siglip_cross_attn": ("configs.libero_40tasks_language", "CONFIG_SIGLIP_CROSS_ATTN"),
 }
 
 
@@ -217,9 +232,19 @@ def build_data(cfg: dict, device: torch.device):
 
 
 def build_model_and_optimizer(cfg: dict, device: torch.device):
-    fusion = build_fusion(cfg.get("fusion_type"), d_model=cfg["d_model"])
+    # backbone_type (ablação de backbones pareados, ver models/backbones/):
+    # "resnet18" (default, MiniLM pro texto) | "clip_vitb32" | "siglip2_base"
+    # (torre de texto pareada com o backbone visual, não MiniLM).
+    backbone_type = cfg.get("backbone_type", "resnet18")
+    text_encoder_cls, text_model_name = resolve_text_encoder_spec(backbone_type)
+    text_encoder = text_encoder_cls(text_model_name)
+
+    fusion = build_fusion(
+        cfg.get("fusion_type"), d_model=cfg["d_model"],
+        text_encoder=text_encoder, text_embed_dim=text_encoder.embed_dim,
+    )
     if fusion is not None:
-        print(f"fusão de linguagem: {cfg['fusion_type']}")
+        print(f"fusão de linguagem: {cfg['fusion_type']} (texto: {text_model_name})")
 
     model = ACT(
         action_dim=cfg["action_dim"], state_dim=cfg["state_dim"],
@@ -227,10 +252,14 @@ def build_model_and_optimizer(cfg: dict, device: torch.device):
         chunk_size=cfg["chunk_size"], n_cameras=cfg["n_cameras"],
         n_encoder_layers=cfg["n_encoder_layers"], n_decoder_layers=cfg["n_decoder_layers"],
         n_heads=cfg["n_heads"], dropout=cfg["dropout"], pretrained_backbone=True,
-        decoder_style=cfg["decoder_style"], fusion=fusion,
+        decoder_style=cfg["decoder_style"], fusion=fusion, backbone_type=backbone_type,
     )
     if cfg["freeze_bn"]:
-        freeze_batchnorm(model.vision_backbone)
+        freeze_batchnorm(model.vision_backbone)  # no-op seguro em backbones sem BatchNorm2d (CLIP/SigLIP)
+    if cfg.get("freeze_vision_backbone"):
+        for p in model.vision_backbone.parameters():
+            p.requires_grad = False
+        print(f"backbone visual ({backbone_type}) congelado")
     model = model.to(device)
     print(f"parâmetros: {sum(p.numel() for p in model.parameters()):,}")
 
