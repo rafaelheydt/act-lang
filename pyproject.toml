@@ -18,14 +18,25 @@ dependencies = [
 #   pip install "lerobot[libero]"
 
 [project.optional-dependencies]
-dev = ["pytest", "h5py", "transformers", "sentencepiece"]
+dev = ["pytest", "h5py", "transformers==5.5.4", "sentencepiece"]
 language = ["sentence-transformers"]  # Fase 3: mecanismos de fusão de linguagem
 hdf5 = ["h5py", "huggingface_hub"]  # caminho de dados HDF5 nativo -- ver docs/hdf5_migration.md
 # backbones pareados CLIP ViT-B/32 / SigLIP2-base (models/backbones/,
 # fusion/text_encoder_{clip,siglip}.py) -- e scripts/diagnose_siglip_patch_alignment.py.
 # sentencepiece: exigido pelo tokenizer do SigLIP2 (AutoTokenizer resolve pra
 # um tokenizer estilo Gemma que depende dele).
-vlm = ["transformers", "sentencepiece"]
+#
+# CORREÇÃO (checkpoint incompatível entre treino e avaliação): "transformers"
+# sem pin resolve pra versões DIFERENTES dependendo do que mais está sendo
+# instalado no ambiente -- o notebook de treino (sem lerobot) pegava a mais
+# recente (5.16.1 visto ao vivo); o de avaliação (com "lerobot[libero]",
+# que restringe transformers<5.6.0,>=5.4.0) pegava uma mais antiga. A
+# estrutura interna do CLIPVisionModel MUDOU entre essas versões (achatada
+# vs. aninhada em .vision_model), quebrando load_state_dict entre os dois
+# notebooks com erro de chave "Missing/Unexpected key(s)". Fixar em 5.5.4
+# (a mais recente dentro da faixa que lerobot[libero] aceita) garante a
+# MESMA versão nos dois ambientes, com ou sem lerobot instalado junto.
+vlm = ["transformers==5.5.4", "sentencepiece"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -86,10 +86,17 @@ class TestCLIPVisionBackbone:
 
         assert backbone.proj.weight.grad is not None
         assert backbone.proj.weight.grad.abs().sum() > 0
-        assert backbone.vision_model.embeddings.patch_embedding.weight.grad is not None
-        # ^ CLIPVisionModel expõe embeddings/encoder direto (sem sub-atributo
-        # .vision_model do CLIPModel completo) -- confirmado ao vivo com
-        # config sintética antes de escrever este teste.
+        # Checa que ALGUM parâmetro da torre pré-treinada recebeu gradiente,
+        # sem depender do caminho exato de atributo interno do
+        # CLIPVisionModel -- isso mudou entre versões do transformers
+        # (achatado em algumas, aninhado em .vision_model.vision_model em
+        # outras, ex. 5.5.4, a versão fixada em pyproject.toml -- ver
+        # comentário lá sobre a incompatibilidade de checkpoint que isso
+        # causou entre notebooks de treino/avaliação).
+        assert any(
+            p.grad is not None and p.grad.abs().sum() > 0
+            for p in backbone.vision_model.parameters()
+        )
 
     def test_backbone_congelado_nao_acumula_gradiente(self):
         """Mesmo padrão que build_model_and_optimizer aplica quando
